@@ -238,6 +238,7 @@ export default function QuestionnaireModal({
                       type="text" 
                       value={r.name} 
                       placeholder="Chọn từ danh mục hoặc nhập..."
+                      onFocus={e => e.target.select()}
                       onChange={e => {
                         const next = [...rows];
                         next[idx].name = e.target.value;
@@ -249,10 +250,11 @@ export default function QuestionnaireModal({
                   <td className="border border-slate-300 p-1">
                     <input 
                       type="number" 
-                      value={r.col1_ban} 
+                      value={r.col1_ban === 0 ? '' : r.col1_ban} 
+                      onFocus={e => e.target.select()}
                       onChange={e => {
                         const next = [...rows];
-                        next[idx].col1_ban = Number(e.target.value);
+                        next[idx].col1_ban = e.target.value === '' ? 0 : Number(e.target.value);
                         onUpdateRows(next);
                       }}
                       className="w-full p-1 border rounded text-right font-medium" 
@@ -261,10 +263,11 @@ export default function QuestionnaireModal({
                   <td className="border border-slate-300 p-1">
                     <input 
                       type="number" 
-                      value={r.col2_tuDung} 
+                      value={r.col2_tuDung === 0 ? '' : r.col2_tuDung} 
+                      onFocus={e => e.target.select()}
                       onChange={e => {
                         const next = [...rows];
-                        next[idx].col2_tuDung = Number(e.target.value);
+                        next[idx].col2_tuDung = e.target.value === '' ? 0 : Number(e.target.value);
                         onUpdateRows(next);
                       }}
                       className="w-full p-1 border rounded text-right font-medium" 
@@ -274,10 +277,11 @@ export default function QuestionnaireModal({
                   <td className="border border-slate-300 p-1">
                     <input 
                       type="number" 
-                      value={r.col4_giong} 
+                      value={r.col4_giong === 0 ? '' : r.col4_giong} 
+                      onFocus={e => e.target.select()}
                       onChange={e => {
                         const next = [...rows];
-                        next[idx].col4_giong = Number(e.target.value);
+                        next[idx].col4_giong = e.target.value === '' ? 0 : Number(e.target.value);
                         onUpdateRows(next);
                       }}
                       className="w-full p-1 border rounded text-right font-medium" 
@@ -286,10 +290,11 @@ export default function QuestionnaireModal({
                   <td className="border border-slate-300 p-1">
                     <input 
                       type="number" 
-                      value={r.col5_vatTu} 
+                      value={r.col5_vatTu === 0 ? '' : r.col5_vatTu} 
+                      onFocus={e => e.target.select()}
                       onChange={e => {
                         const next = [...rows];
-                        next[idx].col5_vatTu = Number(e.target.value);
+                        next[idx].col5_vatTu = e.target.value === '' ? 0 : Number(e.target.value);
                         onUpdateRows(next);
                       }}
                       className="w-full p-1 border rounded text-right font-medium" 
@@ -298,10 +303,11 @@ export default function QuestionnaireModal({
                   <td className="border border-slate-300 p-1">
                     <input 
                       type="number" 
-                      value={r.col6_chiKhac} 
+                      value={r.col6_chiKhac === 0 ? '' : r.col6_chiKhac} 
+                      onFocus={e => e.target.select()}
                       onChange={e => {
                         const next = [...rows];
-                        next[idx].col6_chiKhac = Number(e.target.value);
+                        next[idx].col6_chiKhac = e.target.value === '' ? 0 : Number(e.target.value);
                         onUpdateRows(next);
                       }}
                       className="w-full p-1 border rounded text-right font-medium" 
@@ -334,8 +340,36 @@ export default function QuestionnaireModal({
     </div>
   );
 
+  const handleKeyDownNavigation = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && e.target instanceof HTMLElement) {
+      const tagName = e.target.tagName.toLowerCase();
+      if (tagName === 'input' || tagName === 'select' || tagName === 'textarea') {
+        e.preventDefault();
+
+        const container = e.currentTarget;
+        const allInputs = Array.from(
+          container.querySelectorAll<HTMLElement>(
+            'input:not([type="hidden"]):not([type="radio"]):not([type="checkbox"]):not([disabled]), select:not([disabled]), textarea:not([disabled])'
+          )
+        ).filter(el => el.offsetWidth > 0 && el.offsetHeight > 0);
+
+        const currentIndex = allInputs.indexOf(e.target);
+        if (currentIndex >= 0 && currentIndex < allInputs.length - 1) {
+          const nextElem = allInputs[currentIndex + 1];
+          nextElem.focus();
+          if (nextElem instanceof HTMLInputElement) {
+            nextElem.select();
+          }
+        }
+      }
+    }
+  };
+
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-1 md:p-3 overflow-hidden">
+    <div 
+      onKeyDown={handleKeyDownNavigation}
+      className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-1 md:p-3 overflow-hidden"
+    >
       <div className="bg-white rounded-lg border border-slate-300 shadow-2xl w-full max-w-[98vw] flex flex-col h-[96vh] max-h-[96vh] overflow-hidden text-xs">
         
         {/* Top Header */}
@@ -617,6 +651,7 @@ export default function QuestionnaireModal({
                             <input 
                               type="text" 
                               value={r.name} 
+                              onFocus={e => e.target.select()}
                               onChange={e => {
                                 const next = [...q.muc1_rows];
                                 next[idx].name = e.target.value;
@@ -629,6 +664,7 @@ export default function QuestionnaireModal({
                             <input 
                               type="text" 
                               value={r.job} 
+                              onFocus={e => e.target.select()}
                               onChange={e => {
                                 const next = [...q.muc1_rows];
                                 next[idx].job = e.target.value;
@@ -640,10 +676,11 @@ export default function QuestionnaireModal({
                           <td className="p-1.5 border border-slate-300">
                             <input 
                               type="number" 
-                              value={r.col1_luong} 
+                              value={r.col1_luong === 0 ? '' : r.col1_luong} 
+                              onFocus={e => e.target.select()}
                               onChange={e => {
                                 const next = [...q.muc1_rows];
-                                next[idx].col1_luong = Number(e.target.value);
+                                next[idx].col1_luong = e.target.value === '' ? 0 : Number(e.target.value);
                                 updateQ(prev => ({ ...prev, muc1_rows: next }));
                               }}
                               className="w-full p-1 border rounded text-right font-medium" 
@@ -652,10 +689,11 @@ export default function QuestionnaireModal({
                           <td className="p-1.5 border border-slate-300">
                             <input 
                               type="number" 
-                              value={r.col2_troCap} 
+                              value={r.col2_troCap === 0 ? '' : r.col2_troCap} 
+                              onFocus={e => e.target.select()}
                               onChange={e => {
                                 const next = [...q.muc1_rows];
-                                next[idx].col2_troCap = Number(e.target.value);
+                                next[idx].col2_troCap = e.target.value === '' ? 0 : Number(e.target.value);
                                 updateQ(prev => ({ ...prev, muc1_rows: next }));
                               }}
                               className="w-full p-1 border rounded text-right font-medium" 
@@ -686,7 +724,7 @@ export default function QuestionnaireModal({
                           {(q.muc1_rows || []).reduce((s, r) => s + (Number(r.col2_troCap) || 0), 0).toLocaleString()}
                         </td>
                         <td className="p-2 border border-slate-300 text-right text-sm text-emerald-800 font-extrabold">
-                          {income.muc1.toLocaleString()}
+                          {income.muc1.toLocaleString()} (1.000 đồng)
                         </td>
                         <td className="p-2 border border-slate-300"></td>
                       </tr>
@@ -742,15 +780,15 @@ export default function QuestionnaireModal({
                       <div className="grid grid-cols-3 gap-2">
                         <div>
                           <label className="text-[11px] text-slate-600">Thu bán (Cột 1):</label>
-                          <input type="number" value={q.muc2_giong?.col1 || 0} onChange={e => updateQ(prev => ({ ...prev, muc2_giong: { ...prev.muc2_giong, col1: Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
+                          <input type="number" value={q.muc2_giong?.col1 === 0 ? '' : q.muc2_giong?.col1 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_giong: { ...prev.muc2_giong, col1: e.target.value === '' ? 0 : Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                         <div>
                           <label className="text-[11px] text-slate-600">Tự dùng (Cột 2):</label>
-                          <input type="number" value={q.muc2_giong?.col2 || 0} onChange={e => updateQ(prev => ({ ...prev, muc2_giong: { ...prev.muc2_giong, col2: Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
+                          <input type="number" value={q.muc2_giong?.col2 === 0 ? '' : q.muc2_giong?.col2 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_giong: { ...prev.muc2_giong, col2: e.target.value === '' ? 0 : Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                         <div>
                           <label className="text-[11px] text-slate-600">Tổng chi phí (Cột 7):</label>
-                          <input type="number" value={(q.muc2_giong?.col4 || 0) + (q.muc2_giong?.col5 || 0) + (q.muc2_giong?.col6 || 0)} onChange={e => updateQ(prev => ({ ...prev, muc2_giong: { ...prev.muc2_giong, col4: Number(e.target.value), col5: 0, col6: 0 } }))} className="w-full p-1 border rounded text-right font-medium" />
+                          <input type="number" value={((q.muc2_giong?.col4 || 0) + (q.muc2_giong?.col5 || 0) + (q.muc2_giong?.col6 || 0)) === 0 ? '' : ((q.muc2_giong?.col4 || 0) + (q.muc2_giong?.col5 || 0) + (q.muc2_giong?.col6 || 0))} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_giong: { ...prev.muc2_giong, col4: e.target.value === '' ? 0 : Number(e.target.value), col5: 0, col6: 0 } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                       </div>
                     </div>
@@ -760,15 +798,15 @@ export default function QuestionnaireModal({
                       <div className="grid grid-cols-3 gap-2">
                         <div>
                           <label className="text-[11px] text-slate-600">Thu bán (Cột 1):</label>
-                          <input type="number" value={q.muc2_sanPhamPhu?.col1 || 0} onChange={e => updateQ(prev => ({ ...prev, muc2_sanPhamPhu: { ...prev.muc2_sanPhamPhu, col1: Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
+                          <input type="number" value={q.muc2_sanPhamPhu?.col1 === 0 ? '' : q.muc2_sanPhamPhu?.col1 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_sanPhamPhu: { ...prev.muc2_sanPhamPhu, col1: e.target.value === '' ? 0 : Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                         <div>
                           <label className="text-[11px] text-slate-600">Tự dùng (Cột 2):</label>
-                          <input type="number" value={q.muc2_sanPhamPhu?.col2 || 0} onChange={e => updateQ(prev => ({ ...prev, muc2_sanPhamPhu: { ...prev.muc2_sanPhamPhu, col2: Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
+                          <input type="number" value={q.muc2_sanPhamPhu?.col2 === 0 ? '' : q.muc2_sanPhamPhu?.col2 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_sanPhamPhu: { ...prev.muc2_sanPhamPhu, col2: e.target.value === '' ? 0 : Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                         <div>
                           <label className="text-[11px] text-slate-600">Chi khác (Cột 6):</label>
-                          <input type="number" value={q.muc2_sanPhamPhu?.col6 || 0} onChange={e => updateQ(prev => ({ ...prev, muc2_sanPhamPhu: { ...prev.muc2_sanPhamPhu, col6: Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
+                          <input type="number" value={q.muc2_sanPhamPhu?.col6 === 0 ? '' : q.muc2_sanPhamPhu?.col6 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_sanPhamPhu: { ...prev.muc2_sanPhamPhu, col6: e.target.value === '' ? 0 : Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                       </div>
                     </div>
@@ -778,11 +816,11 @@ export default function QuestionnaireModal({
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <label className="text-[11px] text-slate-600">Doanh thu dịch vụ (Cột 3):</label>
-                          <input type="number" value={q.muc2_dichVu?.col3 || 0} onChange={e => updateQ(prev => ({ ...prev, muc2_dichVu: { ...prev.muc2_dichVu, col3: Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
+                          <input type="number" value={q.muc2_dichVu?.col3 === 0 ? '' : q.muc2_dichVu?.col3 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_dichVu: { ...prev.muc2_dichVu, col3: e.target.value === '' ? 0 : Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                         <div>
                           <label className="text-[11px] text-slate-600">Chi phí dịch vụ (Cột 6):</label>
-                          <input type="number" value={q.muc2_dichVu?.col6 || 0} onChange={e => updateQ(prev => ({ ...prev, muc2_dichVu: { ...prev.muc2_dichVu, col6: Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
+                          <input type="number" value={q.muc2_dichVu?.col6 === 0 ? '' : q.muc2_dichVu?.col6 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_dichVu: { ...prev.muc2_dichVu, col6: e.target.value === '' ? 0 : Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                       </div>
                     </div>
@@ -791,14 +829,14 @@ export default function QuestionnaireModal({
                       <h5 className="font-bold text-slate-800 text-xs uppercase">5. Tiền đền bù / hỗ trợ thiệt hại dịch bệnh, thiên tai</h5>
                       <div>
                         <label className="text-[11px] text-slate-600">Số tiền nhận được (Cột 8):</label>
-                        <input type="number" value={q.muc2_denBu || 0} onChange={e => updateQ(prev => ({ ...prev, muc2_denBu: Number(e.target.value) }))} className="w-full p-1 border rounded text-right font-bold text-emerald-800" />
+                        <input type="number" value={q.muc2_denBu === 0 ? '' : q.muc2_denBu || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_denBu: e.target.value === '' ? 0 : Number(e.target.value) }))} className="w-full p-1 border rounded text-right font-bold text-emerald-800" />
                       </div>
                     </div>
                   </div>
 
                   <div className="bg-emerald-100 p-2.5 rounded border border-emerald-300 flex justify-between items-center font-bold text-emerald-950">
                     <span>TỔNG THU NHẬP MỤC 2 (TRỒNG TRỌT):</span>
-                    <span className="text-sm font-black">{income.muc2.toLocaleString()} 1.000 đồng</span>
+                    <span className="text-sm font-black">{income.muc2.toLocaleString()} (1.000 đồng)</span>
                   </div>
                 </div>
               )}
@@ -834,7 +872,7 @@ export default function QuestionnaireModal({
                   
                   <div className="bg-emerald-100 p-2.5 rounded border border-emerald-300 flex justify-between items-center font-bold text-emerald-950">
                     <span>TỔNG THU NHẬP MỤC 3 (CHĂN NUÔI):</span>
-                    <span className="text-sm font-black">{income.muc3.toLocaleString()} 1.000 đồng</span>
+                    <span className="text-sm font-black">{income.muc3.toLocaleString()} (1.000 đồng)</span>
                   </div>
                 </div>
               )}
@@ -866,7 +904,7 @@ export default function QuestionnaireModal({
                   {renderProductionTable("1. Khai thác, thu nhặt lâm sản (Quế, hồi, thông, gỗ, tre luồng, củi...)", q.muc4_khaiThacRows || [], rows => updateQ(prev => ({ ...prev, muc4_khaiThacRows: rows })), 'muc4')}
                   <div className="bg-emerald-100 p-2.5 rounded border border-emerald-300 flex justify-between items-center font-bold text-emerald-950">
                     <span>TỔNG THU NHẬP MỤC 4 (LÂM NGHIỆP):</span>
-                    <span className="text-sm font-black">{income.muc4.toLocaleString()} 1.000 đồng</span>
+                    <span className="text-sm font-black">{income.muc4.toLocaleString()} (1.000 đồng)</span>
                   </div>
                 </div>
               )}
@@ -899,7 +937,7 @@ export default function QuestionnaireModal({
                   {renderProductionTable("2. Đánh bắt thủy sản (Cá, tôm, thủy sản sông biển...)", q.muc5_danhBatRows || [], rows => updateQ(prev => ({ ...prev, muc5_danhBatRows: rows })), 'muc5')}
                   <div className="bg-emerald-100 p-2.5 rounded border border-emerald-300 flex justify-between items-center font-bold text-emerald-950">
                     <span>TỔNG THU NHẬP MỤC 5 (THỦY SẢN):</span>
-                    <span className="text-sm font-black">{income.muc5.toLocaleString()} 1.000 đồng</span>
+                    <span className="text-sm font-black">{income.muc5.toLocaleString()} (1.000 đồng)</span>
                   </div>
                 </div>
               )}
@@ -981,6 +1019,7 @@ export default function QuestionnaireModal({
                                   type="text" 
                                   value={r.name} 
                                   placeholder="Ví dụ: Bán hàng tạp hóa, thợ may..."
+                                  onFocus={e => e.target.select()}
                                   onChange={e => {
                                     const next = [...q.muc6_rows];
                                     next[idx].name = e.target.value;
@@ -990,38 +1029,38 @@ export default function QuestionnaireModal({
                                 />
                               </td>
                               <td className="p-1 border border-slate-300">
-                                <input type="number" value={r.col1_ban} onChange={e => {
+                                <input type="number" value={r.col1_ban === 0 ? '' : r.col1_ban} onFocus={e => e.target.select()} onChange={e => {
                                   const next = [...q.muc6_rows];
-                                  next[idx].col1_ban = Number(e.target.value);
+                                  next[idx].col1_ban = e.target.value === '' ? 0 : Number(e.target.value);
                                   updateQ(prev => ({ ...prev, muc6_rows: next }));
                                 }} className="w-full p-1 border rounded text-right font-medium" />
                               </td>
                               <td className="p-1 border border-slate-300">
-                                <input type="number" value={r.col2_tuDung} onChange={e => {
+                                <input type="number" value={r.col2_tuDung === 0 ? '' : r.col2_tuDung} onFocus={e => e.target.select()} onChange={e => {
                                   const next = [...q.muc6_rows];
-                                  next[idx].col2_tuDung = Number(e.target.value);
+                                  next[idx].col2_tuDung = e.target.value === '' ? 0 : Number(e.target.value);
                                   updateQ(prev => ({ ...prev, muc6_rows: next }));
                                 }} className="w-full p-1 border rounded text-right font-medium" />
                               </td>
                               <td className="p-1 border border-slate-300 text-right font-bold text-sky-900 bg-sky-50">{col3.toLocaleString()}</td>
                               <td className="p-1 border border-slate-300">
-                                <input type="number" value={r.col4_nguyenLieu} onChange={e => {
+                                <input type="number" value={r.col4_nguyenLieu === 0 ? '' : r.col4_nguyenLieu} onFocus={e => e.target.select()} onChange={e => {
                                   const next = [...q.muc6_rows];
-                                  next[idx].col4_nguyenLieu = Number(e.target.value);
+                                  next[idx].col4_nguyenLieu = e.target.value === '' ? 0 : Number(e.target.value);
                                   updateQ(prev => ({ ...prev, muc6_rows: next }));
                                 }} className="w-full p-1 border rounded text-right font-medium" />
                               </td>
                               <td className="p-1 border border-slate-300">
-                                <input type="number" value={r.col5_nangLuong} onChange={e => {
+                                <input type="number" value={r.col5_nangLuong === 0 ? '' : r.col5_nangLuong} onFocus={e => e.target.select()} onChange={e => {
                                   const next = [...q.muc6_rows];
-                                  next[idx].col5_nangLuong = Number(e.target.value);
+                                  next[idx].col5_nangLuong = e.target.value === '' ? 0 : Number(e.target.value);
                                   updateQ(prev => ({ ...prev, muc6_rows: next }));
                                 }} className="w-full p-1 border rounded text-right font-medium" />
                               </td>
                               <td className="p-1 border border-slate-300">
-                                <input type="number" value={r.col6_chiKhac} onChange={e => {
+                                <input type="number" value={r.col6_chiKhac === 0 ? '' : r.col6_chiKhac} onFocus={e => e.target.select()} onChange={e => {
                                   const next = [...q.muc6_rows];
-                                  next[idx].col6_chiKhac = Number(e.target.value);
+                                  next[idx].col6_chiKhac = e.target.value === '' ? 0 : Number(e.target.value);
                                   updateQ(prev => ({ ...prev, muc6_rows: next }));
                                 }} className="w-full p-1 border rounded text-right font-medium" />
                               </td>
@@ -1041,7 +1080,7 @@ export default function QuestionnaireModal({
 
                   <div className="bg-emerald-100 p-2.5 rounded border border-emerald-300 flex justify-between items-center font-bold text-emerald-950 mt-2">
                     <span>TỔNG THU NHẬP MỤC 6 (PHI NÔNG NGHIỆP):</span>
-                    <span className="text-sm font-black">{income.muc6.toLocaleString()} 1.000 đồng</span>
+                    <span className="text-sm font-black">{income.muc6.toLocaleString()} (1.000 đồng)</span>
                   </div>
                 </div>
               )}
@@ -1067,15 +1106,15 @@ export default function QuestionnaireModal({
                   <strong className="text-sky-900 block text-xs">1. Thu nhập từ các nguồn hỗ trợ bên ngoài hộ:</strong>
                   <div>
                     <label className="text-slate-600 text-[11px] block">1.1 Tiền, hiện vật người ngoài biếu/tặng/mừng/giúp:</label>
-                    <input type="number" value={q.muc7_1_1 || 0} onChange={e => updateQ(prev => ({ ...prev, muc7_1_1: Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
+                    <input type="number" value={q.muc7_1_1 === 0 ? '' : q.muc7_1_1 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc7_1_1: e.target.value === '' ? 0 : Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
                   </div>
                   <div>
                     <label className="text-slate-600 text-[11px] block">1.2 Trợ cấp xã hội (người có công, hộ nghèo, bảo trợ, thiên tai...):</label>
-                    <input type="number" value={q.muc7_1_2 || 0} onChange={e => updateQ(prev => ({ ...prev, muc7_1_2: Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
+                    <input type="number" value={q.muc7_1_2 === 0 ? '' : q.muc7_1_2 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc7_1_2: e.target.value === '' ? 0 : Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
                   </div>
                   <div>
                     <label className="text-slate-600 text-[11px] block">1.3 Học bổng, thưởng giáo dục, trợ giúp y tế:</label>
-                    <input type="number" value={q.muc7_1_3 || 0} onChange={e => updateQ(prev => ({ ...prev, muc7_1_3: Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
+                    <input type="number" value={q.muc7_1_3 === 0 ? '' : q.muc7_1_3 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc7_1_3: e.target.value === '' ? 0 : Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
                   </div>
                 </div>
 
@@ -1083,22 +1122,22 @@ export default function QuestionnaireModal({
                   <strong className="text-sky-900 block text-xs">2. Thu nhập từ sở hữu tài sản & Khác:</strong>
                   <div>
                     <label className="text-slate-600 text-[11px] block">2.1 Cho thuê tài sản, đất đai, nhà ở:</label>
-                    <input type="number" value={q.muc7_2_1 || 0} onChange={e => updateQ(prev => ({ ...prev, muc7_2_1: Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
+                    <input type="number" value={q.muc7_2_1 === 0 ? '' : q.muc7_2_1 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc7_2_1: e.target.value === '' ? 0 : Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
                   </div>
                   <div>
                     <label className="text-slate-600 text-[11px] block">2.2 Lãi đầu tư, tín dụng, tiết kiệm, cổ phần, cho vay:</label>
-                    <input type="number" value={q.muc7_2_2 || 0} onChange={e => updateQ(prev => ({ ...prev, muc7_2_2: Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
+                    <input type="number" value={q.muc7_2_2 === 0 ? '' : q.muc7_2_2 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc7_2_2: e.target.value === '' ? 0 : Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
                   </div>
                   <div>
                     <label className="text-slate-600 text-[11px] block">3. Thu nhập khác (Trúng xổ số, vui chơi có thưởng...):</label>
-                    <input type="number" value={q.muc7_3 || 0} onChange={e => updateQ(prev => ({ ...prev, muc7_3: Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
+                    <input type="number" value={q.muc7_3 === 0 ? '' : q.muc7_3 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc7_3: e.target.value === '' ? 0 : Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
                   </div>
                 </div>
               </div>
 
               <div className="bg-emerald-100 p-2.5 rounded border border-emerald-300 flex justify-between items-center font-bold text-emerald-950">
                 <span>TỔNG THU NHẬP MỤC 7 (THU KHÁC):</span>
-                <span className="text-sm font-black">{income.muc7.toLocaleString()} 1.000 đồng</span>
+                <span className="text-sm font-black">{income.muc7.toLocaleString()} (1.000 đồng)</span>
               </div>
             </div>
           )}
@@ -1190,7 +1229,7 @@ export default function QuestionnaireModal({
           <div className="flex items-center gap-2">
             <span className="font-bold text-slate-700">Tổng thu nhập hộ:</span>
             <span className="font-black text-emerald-800 text-sm bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
-              {income.total.toLocaleString()} 1.000 đồng
+              {income.total.toLocaleString()} (1.000 đồng)
             </span>
           </div>
 

@@ -11,3 +11,13 @@ th, thead th {
   text-transform: none !important;
   font-weight: 600 !important;
 }
+
+/* Hide number input spinners for clean data entry */
+input[type=number]::-webkit-inner-spin-button, 
+input[type=number]::-webkit-outer-spin-button { 
+  -webkit-appearance: none; 
+  margin: 0; 
+}
+input[type=number] {
+  -moz-appearance: textfield;
+}
