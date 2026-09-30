@@ -520,11 +520,11 @@ export default function App() {
             }
           });
 
-          // 2. Tìm dòng tiêu đề cột chính (Header Row - Thường ở dòng 6)
+          // 2. Tìm dòng tiêu đề cột chính (Header Row)
           const rowText = row.map(c => String(c).toLowerCase().trim()).join(' ');
           if (
-            (rowText.includes('họ và tên') || rowText.includes('chủ hộ')) &&
-            (rowText.includes('địa chỉ') || rowText.includes('nhân khẩu') || rowText.includes('nguồn thu') || rowText.includes('stt'))
+            (rowText.includes('họ và tên') || rowText.includes('chủ hộ') || rowText.includes('họ tên')) &&
+            (rowText.includes('địa chỉ') || rowText.includes('nhân kh') || rowText.includes('nhân khẩu') || rowText.includes('nguồn thu') || rowText.includes('stt') || rowText.includes('trạng thái'))
           ) {
             headerRowIdx = r;
           }
@@ -533,23 +533,16 @@ export default function App() {
         if (!firstDetectedCommuneName && detectedCommuneName) firstDetectedCommuneName = detectedCommuneName;
         if (!firstDetectedCommuneCode && detectedCommuneCode) firstDetectedCommuneCode = detectedCommuneCode;
 
-        // Cấu hình vị trí cột chuẩn theo biểu mẫu:
-        // Cột 0: STT (A)
-        // Cột 1: Họ và tên chủ hộ (B)
-        // Cột 2: Địa chỉ của hộ (C)
-        // Cột 3: Số nhân khẩu thực tế (1)
-        // Cột 4: Nguồn thu nhập lớn nhất 1-4 (2)
-        // Cột 5: Phân loại mẫu (3)
-        // Cột 6: Ghi chú (4)
+        // Cấu hình vị trí cột mặc định
         let colIdx = {
-          sttMau: 0,
-          name: 1,
-          address: 2,
-          members: 3,
-          sector: 4,
-          status: 5,
-          note: 6,
-          sttGoc: 0
+          sttMau: -1,
+          status: -1,
+          sttGoc: -1,
+          name: -1,
+          address: -1,
+          members: -1,
+          sector: -1,
+          note: -1
         };
 
         if (headerRowIdx >= 0) {
@@ -557,21 +550,21 @@ export default function App() {
           headerRow.forEach((cellVal: any, cIdx: number) => {
             const text = String(cellVal || '').toLowerCase().trim();
             if (text.includes('họ và tên') || text.includes('chủ hộ') || text === 'họ tên') {
-              colIdx.name = cIdx;
-            } else if (text.includes('địa chỉ') || text.includes('thôn') || text.includes('xóm') || text.includes('tổ')) {
-              colIdx.address = cIdx;
-            } else if (text.includes('nhân khẩu') || text.includes('số người') || text.includes('thường trú')) {
-              colIdx.members = cIdx;
-            } else if (text.includes('nguồn thu') || text.includes('thu nhập lớn nhất') || text.includes('ngành')) {
-              colIdx.sector = cIdx;
-            } else if (text.includes('phân loại') || text.includes('loại mẫu') || text.includes('trạng thái')) {
-              colIdx.status = cIdx;
+              if (colIdx.name === -1) colIdx.name = cIdx;
+            } else if (text.includes('địa chỉ') || text.includes('thôn') || text.includes('xóm') || text.includes('tổ') || text.includes('đội')) {
+              if (colIdx.address === -1) colIdx.address = cIdx;
+            } else if (text.includes('nhân kh') || text.includes('nhân khẩu') || text.includes('số người') || text.includes('thường trú')) {
+              if (colIdx.members === -1) colIdx.members = cIdx;
+            } else if (text.includes('nguồn thu') || text.includes('thu nhập lớn nhất') || text.includes('ngành kinh tế')) {
+              if (colIdx.sector === -1) colIdx.sector = cIdx;
+            } else if (text.includes('trạng thái') || text.includes('loại mẫu') || text.includes('mẫu điều tra') || text.includes('chính thức')) {
+              if (colIdx.status === -1) colIdx.status = cIdx;
             } else if (text.includes('ghi chú') || text.includes('sđt') || text.includes('điện thoại')) {
-              colIdx.note = cIdx;
+              if (colIdx.note === -1) colIdx.note = cIdx;
             } else if (text === 'stt' || (text.includes('stt') && !text.includes('gốc'))) {
-              colIdx.sttMau = cIdx;
+              if (colIdx.sttMau === -1) colIdx.sttMau = cIdx;
             } else if (text.includes('gốc')) {
-              colIdx.sttGoc = cIdx;
+              if (colIdx.sttGoc === -1) colIdx.sttGoc = cIdx;
             }
           });
         }
@@ -579,13 +572,18 @@ export default function App() {
         // 3. Xác định dòng bắt đầu dữ liệu hộ (Bỏ qua dòng ký hiệu cột A, B, C, 1, 2, 3...)
         let startRow = headerRowIdx >= 0 ? headerRowIdx + 1 : 0;
         for (let checkR = startRow; checkR < Math.min(startRow + 3, rows.length); checkR++) {
-          const rText = (rows[checkR] || []).map((c: any) => String(c).trim().toUpperCase()).join(' ');
-          if (
-            rText.includes('(A)') || rText.includes('(B)') || rText.includes('(C)') ||
-            rText.includes('(1)') || rText.includes('(2)') || rText.includes('(3)') ||
-            rText.includes('(4)') || (rText.includes('A') && rText.includes('B') && rText.includes('C')) ||
-            rText === 'A B C 1 2 3 4' || rText.startsWith('A') && rText.includes('B')
-          ) {
+          const rowCells = (rows[checkR] || []).map((c: any) => String(c).trim().toUpperCase()).filter(Boolean);
+          const rText = rowCells.join(' ');
+          
+          // Kiểm tra xem dòng có phải là dòng ký hiệu mã cột (Ví dụ: ["A", "B", "C", "1", "2", "3"] hoặc ["(A)", "(B)"])
+          const isColumnCodeRow = rowCells.length > 0 && rowCells.every(cell => 
+            cell === 'A' || cell === 'B' || cell === 'C' || cell === 'D' || cell === 'E' || cell === 'F' || cell === 'G' || cell === 'H' || cell === 'I' ||
+            cell === '(A)' || cell === '(B)' || cell === '(C)' || cell === '(D)' || cell === '(E)' ||
+            cell === '1' || cell === '2' || cell === '3' || cell === '4' || cell === '5' ||
+            cell === '(1)' || cell === '(2)' || cell === '(3)' || cell === '(4)' || cell === '(5)'
+          );
+
+          if (isColumnCodeRow || rText === 'A B C 1 2 3 4' || rText === 'A B C D E 1 2 3 4' || rText === 'A B C D E F G H I') {
             startRow = checkR + 1;
           }
         }
@@ -603,7 +601,7 @@ export default function App() {
           const rowStringAll = row.map(c => String(c || '').trim()).join(' ');
           if (!rowStringAll) continue;
 
-          // Bỏ qua phần ghi chú hướng dẫn ở cuối bảng (VD: "HƯỚNG DẪN MÃ NGUỒN THU NHẬP (CỘT 2)...")
+          // Bỏ qua phần ghi chú hướng dẫn ở cuối bảng
           const lowerAll = rowStringAll.toLowerCase();
           if (
             lowerAll.includes('hướng dẫn') ||
@@ -616,27 +614,32 @@ export default function App() {
             continue;
           }
 
-          // Lấy họ tên chủ hộ
-          let rawName = String(row[colIdx.name] || '').trim();
+          // Phân tích thông minh các ô trong dòng dữ liệu hộ
+          let rawName = colIdx.name >= 0 ? String(row[colIdx.name] || '').trim() : '';
 
-          // Kiểm tra xem tên có bị lệch sang cột bên cạnh không nếu cột name trống
-          if (!rawName || rawName.length < 2 || /^\d+$/.test(rawName) || rawName.startsWith('(')) {
-            for (let c = 0; c < Math.min(row.length, 5); c++) {
+          // Nếu colIdx.name không chuẩn hoặc chứa số/từ khóa tiêu đề, tự tìm ô tên chủ hộ hợp lệ
+          if (!rawName || rawName.length < 2 || /^\d+$/.test(rawName) || rawName.startsWith('(') || rawName.toUpperCase().includes('CHÍNH THỨC') || rawName.toUpperCase().includes('DỰ PHÒNG')) {
+            for (let c = 0; c < row.length; c++) {
               const cand = String(row[c] || '').trim();
               if (
-                cand.length > 2 &&
+                cand.length >= 2 &&
                 !/^\d+$/.test(cand) &&
                 !cand.startsWith('(') &&
                 !cand.toUpperCase().includes('CHÍNH THỨC') &&
                 !cand.toUpperCase().includes('DỰ PHÒNG') &&
-                !cand.toLowerCase().includes('đường') &&
-                !cand.toLowerCase().includes('đội') &&
-                !cand.toLowerCase().includes('thôn') &&
-                !cand.toLowerCase().includes('tdp') &&
-                !cand.toLowerCase().includes('bảng kê')
+                !cand.toLowerCase().includes('bảng kê') &&
+                !cand.toLowerCase().includes('điều tra') &&
+                !cand.toLowerCase().includes('họ và tên') &&
+                !cand.toLowerCase().includes('stt') &&
+                !cand.toLowerCase().includes('xã/phường') &&
+                !cand.toLowerCase().includes('tỉnh:')
               ) {
-                rawName = cand;
-                break;
+                // Ưu tiên ô có cấu trúc giống tên người (2 từ trở lên và không chứa từ chỉ địa chỉ)
+                const wordCount = cand.split(/\s+/).length;
+                if (wordCount >= 2 && !cand.toLowerCase().startsWith('xóm') && !cand.toLowerCase().startsWith('thôn') && !cand.toLowerCase().startsWith('tổ')) {
+                  rawName = cand;
+                  break;
+                }
               }
             }
           }
@@ -646,7 +649,7 @@ export default function App() {
           if (
             upperName.startsWith('(') || 
             upperName === 'A' || upperName === 'B' || upperName === 'C' || 
-            upperName === 'D' || upperName === '1' || upperName === '2' || 
+            upperName === 'D' || upperName === 'E' || upperName === '1' || upperName === '2' || 
             upperName === '3' || upperName === '4' || upperName.includes('(A)') || 
             upperName.includes('(B)') || upperName.includes('(1)') || upperName.includes('(2)')
           ) {
@@ -670,47 +673,97 @@ export default function App() {
 
           sheetHouseholdCount++;
 
-          // STT mẫu
-          let sttMauVal = String(row[colIdx.sttMau] || '').trim();
+          // Tự động phân loại mẫu: CHÍNH THỨC hoặc DỰ PHÒNG
+          let statusVal: 'CHÍNH THỨC' | 'DỰ PHÒNG' = 'CHÍNH THỨC';
+          const fullRowUpper = row.map(c => String(c || '').trim().toUpperCase()).join(' ');
+          if (fullRowUpper.includes('DỰ PHÒNG') || fullRowUpper.includes('DỰ PHONG') || fullRowUpper.includes('DP')) {
+            statusVal = 'DỰ PHÒNG';
+          }
+
+          // STT mẫu & STT gốc
+          let sttMauVal = colIdx.sttMau >= 0 ? String(row[colIdx.sttMau] || '').trim() : '';
+          if (!sttMauVal || !/^\d+$/.test(sttMauVal)) {
+            // Tự tìm ô chứa số STT ở các cột đầu
+            for (let c = 0; c < Math.min(row.length, 4); c++) {
+              const val = String(row[c] || '').trim();
+              if (/^\d+$/.test(val)) {
+                sttMauVal = val;
+                break;
+              }
+            }
+          }
           if (!sttMauVal || !/^\d+$/.test(sttMauVal)) {
             sttMauVal = String(sheetHouseholdCount);
           }
 
-          // STT gốc
-          let sttGocVal = String(row[colIdx.sttGoc] || '').trim();
+          let sttGocVal = colIdx.sttGoc >= 0 ? String(row[colIdx.sttGoc] || '').trim() : '';
           if (!sttGocVal || !/^\d+$/.test(sttGocVal)) {
             sttGocVal = sttMauVal;
           }
 
           // Địa chỉ của hộ
-          let addressVal = String(row[colIdx.address] || '').trim();
+          let addressVal = colIdx.address >= 0 ? String(row[colIdx.address] || '').trim() : '';
+          if (!addressVal || addressVal === rawName || /^\d+$/.test(addressVal)) {
+            // Tự tìm ô địa chỉ (chứa xóm, thôn, tổ, đội, x7...)
+            for (let c = 0; c < row.length; c++) {
+              const cand = String(row[c] || '').trim();
+              const candLower = cand.toLowerCase();
+              if (
+                candLower.includes('thôn') || candLower.includes('xóm') || candLower.includes('tổ') ||
+                candLower.includes('đội') || candLower.includes('số') || candLower.startsWith('x')
+              ) {
+                addressVal = cand;
+                break;
+              }
+            }
+          }
           if (!addressVal || addressVal === rawName) {
             addressVal = areaNameFinal;
           }
 
-          // Số nhân khẩu thực tế (Cột 3)
-          let membersVal = Number(row[colIdx.members]);
+          // Số nhân khẩu thực tế
+          let membersVal = colIdx.members >= 0 ? Number(row[colIdx.members]) : NaN;
+          if (isNaN(membersVal) || membersVal <= 0 || membersVal > 25) {
+            // Tự tìm ô số nhân khẩu (thường là số nguyên từ 1 đến 15)
+            for (let c = 0; c < row.length; c++) {
+              const num = Number(row[c]);
+              if (!isNaN(num) && num >= 1 && num <= 20 && c !== colIdx.sttMau && c !== colIdx.sttGoc) {
+                membersVal = num;
+                break;
+              }
+            }
+          }
           if (isNaN(membersVal) || membersVal <= 0) membersVal = 3;
 
-          // Nguồn thu nhập lớn nhất (1-4) (Cột 4)
-          let rawSector = String(row[colIdx.sector] || '').trim();
-          let sectorVal = 2; // Default
+          // Nguồn thu nhập lớn nhất (1-4)
+          let sectorVal = 2;
+          let rawSector = colIdx.sector >= 0 ? String(row[colIdx.sector] || '').trim() : '';
           const sectorMatch = rawSector.match(/[1-4]/);
           if (sectorMatch) {
             sectorVal = Number(sectorMatch[0]);
+          } else {
+            // Tìm trong toàn bộ các ô thuộc dòng
+            for (let c = 0; c < row.length; c++) {
+              const strC = String(row[c] || '').trim();
+              if (/^[1-4]$/.test(strC)) {
+                sectorVal = Number(strC);
+                break;
+              } else if (strC.toLowerCase().includes('nông') || strC.toLowerCase().includes('lâm') || strC.toLowerCase().includes('trồng')) {
+                sectorVal = 1; break;
+              } else if (strC.toLowerCase().includes('công nghiệp') || strC.toLowerCase().includes('xây dựng')) {
+                sectorVal = 2; break;
+              } else if (strC.toLowerCase().includes('thương mại') || strC.toLowerCase().includes('dịch vụ')) {
+                sectorVal = 3; break;
+              } else if (strC.toLowerCase().includes('thu khác') || strC.toLowerCase().includes('trợ cấp')) {
+                sectorVal = 4; break;
+              }
+            }
           }
 
-          // Phân loại mẫu (Cột 5: "Chính thức (10 hộ/ĐB)" hoặc "Dự phòng (4 hộ/ĐB)")
-          let rawStatus = String(row[colIdx.status] || '').trim().toUpperCase();
-          let statusVal: 'CHÍNH THỨC' | 'DỰ PHÒNG' = 'CHÍNH THỨC';
-          if (rawStatus.includes('DỰ') || rawStatus.includes('PHÒNG') || rawStatus.includes('DP')) {
-            statusVal = 'DỰ PHÒNG';
-          }
-
-          // Ghi chú & SĐT (Cột 6)
-          let noteVal = String(row[colIdx.note] || '').trim();
+          // Ghi chú & SĐT
+          let noteVal = colIdx.note >= 0 ? String(row[colIdx.note] || '').trim() : '';
           let phoneVal = '';
-          const phoneMatch = (noteVal + ' ' + addressVal).match(/0\d{8,10}/);
+          const phoneMatch = (rowStringAll).match(/0\d{8,10}/);
           if (phoneMatch) {
             phoneVal = phoneMatch[0];
           }
