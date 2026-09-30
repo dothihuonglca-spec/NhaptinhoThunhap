@@ -89,30 +89,6 @@ export default function CatalogModal({ isOpen, onClose, onSelect, initialTab = '
             >
               3. Lâm nghiệp (14 loại)
             </button>
-            <button 
-              onClick={() => { setActiveTab('muc5'); setKeyword(''); }}
-              className={`px-2.5 py-1.5 rounded font-bold cursor-pointer transition-colors ${activeTab === 'muc5' ? 'bg-sky-700 text-white' : 'bg-white text-slate-700 border hover:bg-slate-50'}`}
-            >
-              4. Thủy sản (9 loại)
-            </button>
-            <button 
-              onClick={() => { setActiveTab('muc6'); setKeyword(''); }}
-              className={`px-2.5 py-1.5 rounded font-bold cursor-pointer transition-colors ${activeTab === 'muc6' ? 'bg-sky-700 text-white' : 'bg-white text-slate-700 border hover:bg-slate-50'}`}
-            >
-              5. Phi nông nghiệp & DV (27 loại)
-            </button>
-            <button 
-              onClick={() => { setActiveTab('muc1'); setKeyword(''); }}
-              className={`px-2.5 py-1.5 rounded font-bold cursor-pointer transition-colors ${activeTab === 'muc1' ? 'bg-sky-700 text-white' : 'bg-white text-slate-700 border hover:bg-slate-50'}`}
-            >
-              6. Việc làm / Nghề nghiệp
-            </button>
-            <button 
-              onClick={() => { setActiveTab('muc7'); setKeyword(''); }}
-              className={`px-2.5 py-1.5 rounded font-bold cursor-pointer transition-colors ${activeTab === 'muc7' ? 'bg-sky-700 text-white' : 'bg-white text-slate-700 border hover:bg-slate-50'}`}
-            >
-              7. Thu khác & Trợ cấp
-            </button>
           </div>
 
           <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded px-2.5 py-1 w-64 shadow-2xs">

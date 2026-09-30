@@ -3163,30 +3163,6 @@ export default function App() {
                 >
                   3. Lâm nghiệp (14 loại)
                 </button>
-                <button
-                  onClick={() => { setCatalogExplorerTab('muc5'); setCatalogSearchTerm(''); }}
-                  className={`px-3 py-1.5 rounded font-bold cursor-pointer transition-colors ${catalogExplorerTab === 'muc5' ? 'bg-sky-800 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
-                >
-                  4. Thủy sản (9 loại)
-                </button>
-                <button
-                  onClick={() => { setCatalogExplorerTab('muc6'); setCatalogSearchTerm(''); }}
-                  className={`px-3 py-1.5 rounded font-bold cursor-pointer transition-colors ${catalogExplorerTab === 'muc6' ? 'bg-sky-800 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
-                >
-                  5. Phi nông nghiệp & DV (27 loại)
-                </button>
-                <button
-                  onClick={() => { setCatalogExplorerTab('muc1'); setCatalogSearchTerm(''); }}
-                  className={`px-3 py-1.5 rounded font-bold cursor-pointer transition-colors ${catalogExplorerTab === 'muc1' ? 'bg-sky-800 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
-                >
-                  6. Việc làm / Nghề nghiệp (12 loại)
-                </button>
-                <button
-                  onClick={() => { setCatalogExplorerTab('muc7'); setCatalogSearchTerm(''); }}
-                  className={`px-3 py-1.5 rounded font-bold cursor-pointer transition-colors ${catalogExplorerTab === 'muc7' ? 'bg-sky-800 text-white shadow-xs' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
-                >
-                  7. Thu khác & Trợ cấp (11 loại)
-                </button>
               </div>
 
               <div className="flex items-center gap-1.5 bg-sky-50 border border-slate-300 rounded px-2.5 py-1 w-full md:w-72 shadow-2xs">
