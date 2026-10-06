@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { 
-  FileSpreadsheet, Upload, Download, Printer, Plus, Trash2, Edit3, 
+  FileSpreadsheet, Upload, Download, Printer, Plus, PlusCircle, Trash2, Edit3, 
   Save, Database, Layers, Home, Users, BarChart3, Settings, CheckCircle2, 
   AlertCircle, RefreshCw, Filter, Search, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight,
   Check, Cloud, FileText, Loader2, TableProperties, MapPin, Building2, Hash, BookOpen, Copy, 
@@ -21,7 +21,9 @@ import { calculateFullIncome } from './utils/incomeCalculator';
 import QuestionnaireModal from './components/QuestionnaireModal';
 import CatalogModal from './components/CatalogModal';
 import SurveyorManagement from './components/SurveyorManagement';
+import ExcelHeaderConfigModal from './components/ExcelHeaderConfigModal';
 import bannerImg from './assets/images/rural_vietnam_banner_1790736956083.jpg';
+import { OFFICIAL_COMMUNES_CATALOG } from './data/communesCatalog';
 import { 
   Surveyor, UserRole, SurveyStatus, Department, DEFAULT_5_DEPARTMENTS, ROLE_LABELS, SURVEY_STATUS_LABELS 
 } from './types/user';
@@ -99,13 +101,32 @@ interface SurveyArea {
   householdCount?: number;
 }
 
-interface Commune {
+export interface Commune {
   id: string;
   tkcsCode: string;
   tkcsName: string;
   communeCode: string;
   communeName: string;
   fileName?: string;
+  // Bảng kê trong xã (hộ)
+  bkNongLamThuySan?: number;
+  bkCongNghiepXayDung?: number;
+  bkThuongMaiDichVu?: number;
+  bkThuKhacLuong?: number;
+  bkTongSo?: number;
+  // Tỷ trọng %
+  ttNongLamThuySan?: number;
+  ttCongNghiepXayDung?: number;
+  ttThuongMaiDichVu?: number;
+  ttThuKhacLuong?: number;
+  ttTongSo?: number;
+  // Mẫu chính thức
+  mauNongLamThuySan?: number;
+  mauCongNghiepXayDung?: number;
+  mauThuongMaiDichVu?: number;
+  mauThuKhacLuong?: number;
+  mauTongSo?: number;
+  mauDuPhong?: number;
 }
 
 const SECTOR_NAMES = {
@@ -129,7 +150,7 @@ export default function App() {
   
   // Real Login & Authentication States
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
-    return localStorage.getItem('is_user_authenticated') !== 'false';
+    return localStorage.getItem('is_user_authenticated') === 'true';
   });
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState<boolean>(false);
@@ -180,6 +201,17 @@ export default function App() {
     skippedSheets: { sheetName: string; reason: string }[];
   } | null>(null);
 
+  // Duplicate Commune Confirmation Modal state
+  const [pendingDuplicateCommune, setPendingDuplicateCommune] = useState<{
+    existingCommune: Commune;
+    newCommuneData: Commune;
+    duplicateReason: 'BOTH' | 'NAME' | 'CODE';
+    tempAreas: SurveyArea[];
+    tempHouseholds: Household[];
+    skippedSheets: { sheetName: string; reason: string }[];
+    totalParsed: number;
+  } | null>(null);
+
   // Deletion modals & loading states
   const [isClearAllModalOpen, setIsClearAllModalOpen] = useState<boolean>(false);
   const [communeToDelete, setCommuneToDelete] = useState<Commune | null>(null);
@@ -197,6 +229,20 @@ export default function App() {
   const [formCommuneCode, setFormCommuneCode] = useState('');
   const [formCommuneName, setFormCommuneName] = useState('');
 
+  // States for Commune Catalog selection & filtering in Tab 1
+  const [isHeaderConfigModalOpen, setIsHeaderConfigModalOpen] = useState<boolean>(false);
+  const [headerConfigInitialMode, setHeaderConfigInitialMode] = useState<'HOUSEHOLDS' | 'COMMUNE_LIST'>('COMMUNE_LIST');
+  const [selectedCatalogCommuneId, setSelectedCatalogCommuneId] = useState<string>('AUTO');
+  const [isDragOverDropzone, setIsDragOverDropzone] = useState<boolean>(false);
+  const [editingCommune, setEditingCommune] = useState<Commune | null>(null);
+  const [isAddCommuneModalOpen, setIsAddCommuneModalOpen] = useState<boolean>(false);
+  const [newCommuneForm, setNewCommuneForm] = useState<{
+    communeCode: string;
+    communeName: string;
+    tkcsCode: string;
+    tkcsName: string;
+  }>({ communeCode: '', communeName: '', tkcsCode: '', tkcsName: '' });
+
   const [activeHouseholdForm, setActiveHouseholdForm] = useState<Household | null>(null);
   const [isGlobalCatalogOpen, setIsGlobalCatalogOpen] = useState(false);
   const [catalogExplorerTab, setCatalogExplorerTab] = useState<'muc2' | 'muc3' | 'muc4' | 'muc5' | 'muc6' | 'muc1' | 'muc7'>('muc2');
@@ -205,7 +251,7 @@ export default function App() {
   useEffect(() => {
     setLoading(true);
 
-    // Initial load from local cache if present
+    // Initial load from local cache if present or fallback to official communes catalog
     try {
       const cachedH = localStorage.getItem('cached_households');
       if (cachedH) {
@@ -217,7 +263,13 @@ export default function App() {
       const cachedC = localStorage.getItem('cached_communes');
       if (cachedC) {
         const parsed = JSON.parse(cachedC);
-        if (Array.isArray(parsed) && parsed.length > 0) setCommunes(parsed);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setCommunes(parsed);
+        } else {
+          setCommunes(OFFICIAL_COMMUNES_CATALOG);
+        }
+      } else {
+        setCommunes(OFFICIAL_COMMUNES_CATALOG);
       }
       const cachedA = localStorage.getItem('cached_areas');
       if (cachedA) {
@@ -233,18 +285,40 @@ export default function App() {
       if (activeS) setCurrentSurveyorId(activeS);
     } catch (e) {
       console.warn("Local storage cache load warning", e);
+      setCommunes(OFFICIAL_COMMUNES_CATALOG);
     }
 
-    const unsubCommunes = onSnapshot(collection(db, 'communes'), (snapshot) => {
-      const coms: Commune[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Commune));
-      setCommunes(coms);
-      if (coms.length > 0) {
-        localStorage.setItem('cached_communes', JSON.stringify(coms));
+    const unsubCommunes = onSnapshot(collection(db, 'communes'), async (snapshot) => {
+      const existingComs: Commune[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Commune));
+      if (snapshot.empty || existingComs.length === 0) {
+        setCommunes(OFFICIAL_COMMUNES_CATALOG);
+        try { localStorage.setItem('cached_communes', JSON.stringify(OFFICIAL_COMMUNES_CATALOG)); } catch (e) {}
+        // Auto bootstrap initial 104 communes to Firestore
+        try {
+          const batch = writeBatch(db);
+          OFFICIAL_COMMUNES_CATALOG.forEach(c => {
+            batch.set(doc(db, 'communes', c.id), c, { merge: true });
+          });
+          await batch.commit();
+        } catch (err) {
+          console.warn("Firestore bootstrap communes warning:", err);
+        }
       } else {
-        localStorage.removeItem('cached_communes');
+        // Merge existing with official catalog to ensure all 104 communes are present
+        const map = new Map<string, Commune>();
+        existingComs.forEach(c => map.set(c.communeCode || c.id, c));
+        OFFICIAL_COMMUNES_CATALOG.forEach(oc => {
+          if (!map.has(oc.communeCode)) {
+            map.set(oc.communeCode, oc);
+          }
+        });
+        const merged = Array.from(map.values());
+        setCommunes(merged);
+        try { localStorage.setItem('cached_communes', JSON.stringify(merged)); } catch (e) {}
       }
     }, (err) => {
       console.warn("Firestore communes warning:", err);
+      setCommunes(OFFICIAL_COMMUNES_CATALOG);
     });
 
     const unsubAreas = onSnapshot(collection(db, 'surveyAreas'), (snapshot) => {
@@ -345,62 +419,320 @@ export default function App() {
     setTimeout(() => setNotification(null), 4000);
   };
 
+  // Tự động đồng bộ chọn xã theo danh mục xã vừa nạp hoặc đã có
+  useEffect(() => {
+    if (communes.length > 0) {
+      if (selectedCatalogCommuneId === 'AUTO' || !communes.some(c => c.id === selectedCatalogCommuneId)) {
+        const target = selectedCommuneId !== 'ALL' 
+          ? (communes.find(c => c.id === selectedCommuneId) || communes[0]) 
+          : communes[0];
+        setSelectedCatalogCommuneId(target.id);
+        setFormCommuneCode(target.communeCode);
+        setFormCommuneName(target.communeName);
+        setFormTkcsCode(target.tkcsCode);
+        setFormTkcsName(target.tkcsName);
+      }
+    }
+  }, [communes, selectedCommuneId]);
+
+  const handleSelectCommuneFromCatalog = (cId: string) => {
+    setSelectedCatalogCommuneId(cId);
+    if (cId === 'CUSTOM') {
+      return;
+    }
+    const found = communes.find(c => c.id === cId);
+    if (found) {
+      setFormCommuneCode(found.communeCode);
+      setFormCommuneName(found.communeName);
+      setFormTkcsCode(found.tkcsCode);
+      setFormTkcsName(found.tkcsName);
+      // Vào trực tiếp xã đó và địa bàn đó
+      setSelectedCommuneId(found.id);
+      setSelectedTkcs(found.tkcsCode || 'ALL');
+      
+      const communeAreas = areas.filter(a => a.communeId === found.id || (Boolean(found.communeCode) && (a as any).communeCode === found.communeCode));
+      if (communeAreas.length > 0) {
+        setSelectedAreaId(communeAreas[0].id);
+      } else {
+        setSelectedAreaId('ALL');
+      }
+
+      showNotification('success', `Đã vào trực tiếp Thống kê cơ sở: "${found.tkcsName || found.tkcsCode}" — Xã [${found.communeCode}] ${found.communeName}.`);
+    }
+  };
+
+  // Danh sách các tổ TKCS duy nhất từ danh mục xã để lọc
+  const uniqueTkcsList = useMemo(() => {
+    const map = new Map<string, { code: string; name: string }>();
+    communes.forEach(c => {
+      if (c.tkcsCode) {
+        map.set(c.tkcsCode, { code: c.tkcsCode, name: c.tkcsName || c.tkcsCode });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.code.localeCompare(b.code));
+  }, [communes]);
+
+  // Lọc danh sách xã theo Bộ lọc dùng chung (Tổ TKCS, Xã, và từ khóa tìm kiếm)
+  const filteredCommunesForImport = useMemo(() => {
+    return communes.filter(c => {
+      const matchTkcs = selectedTkcs === 'ALL' || c.tkcsCode === selectedTkcs;
+      const matchCommune = selectedCommuneId === 'ALL' || c.id === selectedCommuneId || c.communeCode === selectedCommuneId;
+      const q = searchKeyword.trim().toLowerCase();
+      const matchSearch = !q || 
+        c.communeCode.toLowerCase().includes(q) || 
+        c.communeName.toLowerCase().includes(q) || 
+        (c.tkcsCode && c.tkcsCode.toLowerCase().includes(q)) ||
+        (c.tkcsName && c.tkcsName.toLowerCase().includes(q));
+      return matchTkcs && matchCommune && matchSearch;
+    });
+  }, [communes, selectedTkcs, selectedCommuneId, searchKeyword]);
+
+  // Link trực tiếp từ Danh mục xã sang Tổng hợp nhanh số liệu điều tra (Tab 3)
+  const handleViewCommuneTNH = (c: Commune) => {
+    setTnhScopeMode('COMMUNE_QUICK');
+    setTnhSelectedCommuneId(c.id);
+    setTnhSelectedTkcs(c.tkcsCode || 'ALL');
+    setSelectedCommuneId(c.id);
+    setSelectedTkcs(c.tkcsCode || 'ALL');
+    setActiveTab('tnh');
+    showNotification('success', `Đã liên kết số liệu và mở Tổng hợp nhanh cho [${c.communeCode}] ${c.communeName}.`);
+  };
+
+  // Link trực tiếp từ Danh mục xã sang Tải bảng kê hộ (Tab 1)
+  const handleLoadHouseholdsForCommune = (c: Commune) => {
+    handleSelectCommuneFromCatalog(c.id);
+    setActiveTab('import');
+    showNotification('success', `Đã chọn xã [${c.communeCode}] ${c.communeName}. Sẵn sàng tải file bảng kê.`);
+  };
+
+  const handleSaveEditedCommune = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCommune) return;
+    const cCode = editingCommune.communeCode.trim();
+    const cName = editingCommune.communeName.trim();
+    if (!cCode || !cName) {
+      showNotification('error', 'Vui lòng nhập đầy đủ Mã xã và Tên xã.');
+      return;
+    }
+
+    const conflict = communes.find(c => c.id !== editingCommune.id && c.communeCode && c.communeCode.trim().toLowerCase() === cCode.toLowerCase());
+    if (conflict) {
+      showNotification('error', `Mã xã [${cCode}] đã trùng với xã "${conflict.communeName}". Vui lòng chọn mã khác.`);
+      return;
+    }
+
+    try {
+      const updated: Commune = {
+        ...editingCommune,
+        communeCode: cCode,
+        communeName: cName,
+        tkcsCode: (editingCommune.tkcsCode || 'TKCS-01').trim(),
+        tkcsName: (editingCommune.tkcsName || 'Tổ thống kê cơ sở').trim(),
+      };
+
+      setCommunes(prev => prev.map(c => c.id === updated.id ? updated : c));
+      setHouseholds(prev => prev.map(h => h.communeId === updated.id ? {
+        ...h,
+        communeCode: updated.communeCode,
+        communeName: updated.communeName,
+        tkcsCode: updated.tkcsCode,
+        tkcsName: updated.tkcsName
+      } : h));
+
+      await setDoc(doc(db, 'communes', updated.id), updated, { merge: true });
+
+      // Update households in background
+      setTimeout(async () => {
+        try {
+          const affectedHhs = households.filter(h => h.communeId === updated.id);
+          for (let i = 0; i < affectedHhs.length; i += 300) {
+            const chunk = affectedHhs.slice(i, i + 300);
+            const batch = writeBatch(db);
+            chunk.forEach(h => {
+              batch.update(doc(db, 'households', h.id), {
+                communeCode: updated.communeCode,
+                communeName: updated.communeName,
+                tkcsCode: updated.tkcsCode,
+                tkcsName: updated.tkcsName
+              });
+            });
+            await batch.commit();
+          }
+        } catch (err) {
+          console.warn("Firestore update households warning:", err);
+        }
+      }, 50);
+
+      setEditingCommune(null);
+      showNotification('success', `Đã cập nhật xã [${updated.communeCode}] ${updated.communeName} và đồng bộ lên Firebase.`);
+    } catch (err) {
+      console.error(err);
+      showNotification('error', 'Lỗi lưu thông tin xã lên Firebase.');
+    }
+  };
+
+  const handleCreateNewCommuneDirect = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cCode = newCommuneForm.communeCode.trim();
+    const cName = newCommuneForm.communeName.trim();
+    if (!cCode || !cName) {
+      showNotification('error', 'Vui lòng nhập đầy đủ Mã xã và Tên xã.');
+      return;
+    }
+
+    const conflict = communes.find(c => c.communeCode && c.communeCode.trim().toLowerCase() === cCode.toLowerCase());
+    if (conflict) {
+      showNotification('error', `Mã xã [${cCode}] đã tồn tại trong Danh mục xã. Vui lòng chọn mã khác.`);
+      return;
+    }
+
+    const newCommune: Commune = {
+      id: 'commune-' + Date.now(),
+      communeCode: cCode,
+      communeName: cName,
+      tkcsCode: (newCommuneForm.tkcsCode || 'TKCS-01').trim(),
+      tkcsName: (newCommuneForm.tkcsName || 'Tổ thống kê cơ sở').trim(),
+    };
+
+    try {
+      setCommunes(prev => [...prev, newCommune]);
+      await setDoc(doc(db, 'communes', newCommune.id), newCommune);
+      setSelectedCatalogCommuneId(newCommune.id);
+      setFormCommuneCode(newCommune.communeCode);
+      setFormCommuneName(newCommune.communeName);
+      setFormTkcsCode(newCommune.tkcsCode);
+      setFormTkcsName(newCommune.tkcsName);
+      setIsAddCommuneModalOpen(false);
+      setNewCommuneForm({ communeCode: '', communeName: '', tkcsCode: '', tkcsName: '' });
+      showNotification('success', `Đã thêm xã [${newCommune.communeCode}] ${newCommune.communeName} vào Danh mục xã và lưu cố định trên Firebase.`);
+    } catch (err) {
+      console.error(err);
+      showNotification('error', 'Lỗi lưu xã mới lên Firebase.');
+    }
+  };
+
+  const handleFinalizeCommuneListImport = async (communesList: Commune[]) => {
+    try {
+      const map = new Map<string, Commune>();
+      communes.forEach(c => map.set(c.communeCode || c.id, c));
+      communesList.forEach(c => map.set(c.communeCode || c.id, c));
+      const merged = Array.from(map.values());
+
+      setCommunes(merged);
+      try { localStorage.setItem('cached_communes', JSON.stringify(merged)); } catch (e) {}
+
+      const batch = writeBatch(db);
+      communesList.forEach(c => {
+        batch.set(doc(db, 'communes', c.id), c, { merge: true });
+      });
+      await batch.commit();
+
+      if (communesList.length > 0) {
+        setSelectedCatalogCommuneId(communesList[0].id);
+        setFormCommuneCode(communesList[0].communeCode);
+        setFormCommuneName(communesList[0].communeName);
+        setFormTkcsCode(communesList[0].tkcsCode);
+        setFormTkcsName(communesList[0].tkcsName);
+      }
+
+      showNotification('success', `Đã lưu cố định ${communesList.length} xã vào Danh mục xã và đồng bộ tức thời trên Firebase!`);
+    } catch (err) {
+      console.error(err);
+      showNotification('error', 'Lỗi đồng bộ danh mục xã lên Firebase.');
+    }
+  };
+
   // Update Commune/TKCS metadata for all households in the database
+  // Update Commune/TKCS metadata for selected commune without creating duplicate codes
   const handleUpdateCommuneMetadata = async () => {
     if (!formCommuneName.trim() && !formCommuneCode.trim() && !formTkcsCode.trim() && !formTkcsName.trim()) {
       showNotification('error', 'Vui lòng nhập ít nhất một thông tin Tên/Mã xã hoặc Tên/Mã TKCS.');
       return;
     }
 
+    // Determine target commune to update
+    let targetCommune: Commune | undefined;
+    if (selectedCommuneId !== 'ALL') {
+      targetCommune = communes.find(c => c.id === selectedCommuneId);
+    } else if (communes.length === 1) {
+      targetCommune = communes[0];
+    } else {
+      showNotification('error', 'Hệ thống có nhiều xã. Vui lòng chọn một Xã cụ thể tại ô lọc trên thanh công cụ trước khi bấm Cập nhật.');
+      return;
+    }
+
+    if (!targetCommune) {
+      showNotification('error', 'Không tìm thấy xã để cập nhật.');
+      return;
+    }
+
+    const updatedCommuneName = formCommuneName.trim() || targetCommune.communeName;
+    const updatedCommuneCode = formCommuneCode.trim() || targetCommune.communeCode;
+    const updatedTkcsCode = formTkcsCode.trim() || targetCommune.tkcsCode;
+    const updatedTkcsName = formTkcsName.trim() || targetCommune.tkcsName;
+
+    // Kiểm tra không để trùng mã xã với xã khác
+    const codeConflict = communes.find(c => 
+      c.id !== targetCommune!.id && 
+      c.communeCode && 
+      c.communeCode.trim().toLowerCase() === updatedCommuneCode.trim().toLowerCase()
+    );
+
+    if (codeConflict) {
+      showNotification('error', `Mã xã [${updatedCommuneCode}] đã trùng với xã "${codeConflict.communeName}". Vui lòng chọn mã khác để không bị trùng nhau!`);
+      return;
+    }
+
     try {
-      const updatedCommuneName = formCommuneName.trim();
-      const updatedCommuneCode = formCommuneCode.trim();
-      const updatedTkcsCode = formTkcsCode.trim();
-      const updatedTkcsName = formTkcsName.trim();
+      const targetId = targetCommune.id;
 
-      // Update local state immediately
-      setHouseholds(prev => prev.map(h => ({
-        ...h,
-        communeName: updatedCommuneName || h.communeName,
-        communeCode: updatedCommuneCode || h.communeCode,
-        tkcsCode: updatedTkcsCode || h.tkcsCode,
-        tkcsName: updatedTkcsName || h.tkcsName
-      })));
+      // Update local state immediately for this commune only
+      setHouseholds(prev => prev.map(h => {
+        if (h.communeId !== targetId) return h;
+        return {
+          ...h,
+          communeName: updatedCommuneName,
+          communeCode: updatedCommuneCode,
+          tkcsCode: updatedTkcsCode,
+          tkcsName: updatedTkcsName
+        };
+      }));
 
-      setCommunes(prev => prev.map(c => ({
-        ...c,
-        communeName: updatedCommuneName || c.communeName,
-        communeCode: updatedCommuneCode || c.communeCode,
-        tkcsCode: updatedTkcsCode || c.tkcsCode,
-        tkcsName: updatedTkcsName || c.tkcsName
-      })));
+      setCommunes(prev => prev.map(c => {
+        if (c.id !== targetId) return c;
+        return {
+          ...c,
+          communeName: updatedCommuneName,
+          communeCode: updatedCommuneCode,
+          tkcsCode: updatedTkcsCode,
+          tkcsName: updatedTkcsName
+        };
+      }));
 
-      showNotification('success', 'Đã cập nhật Mã & Tên Xã, TKCS thành công cho toàn bộ danh sách hộ.');
+      showNotification('success', `Đã cập nhật thông tin xã [${updatedCommuneCode}] ${updatedCommuneName} thành công.`);
 
       // Update Firestore in background
       setTimeout(async () => {
         try {
           const batch = writeBatch(db);
-          communes.forEach(c => {
-            batch.update(doc(db, 'communes', c.id), {
-              communeName: updatedCommuneName || c.communeName,
-              communeCode: updatedCommuneCode || c.communeCode,
-              tkcsCode: updatedTkcsCode || c.tkcsCode,
-              tkcsName: updatedTkcsName || c.tkcsName
-            });
+          batch.update(doc(db, 'communes', targetId), {
+            communeName: updatedCommuneName,
+            communeCode: updatedCommuneCode,
+            tkcsCode: updatedTkcsCode,
+            tkcsName: updatedTkcsName
           });
           await batch.commit();
 
-          // Batch update households
-          for (let i = 0; i < households.length; i += 300) {
-            const chunk = households.slice(i, i + 300);
+          const targetHouseholds = households.filter(h => h.communeId === targetId);
+          for (let i = 0; i < targetHouseholds.length; i += 300) {
+            const chunk = targetHouseholds.slice(i, i + 300);
             const hhBatch = writeBatch(db);
             chunk.forEach(h => {
               hhBatch.update(doc(db, 'households', h.id), {
-                communeName: updatedCommuneName || h.communeName,
-                communeCode: updatedCommuneCode || h.communeCode,
-                tkcsCode: updatedTkcsCode || h.tkcsCode,
-                tkcsName: updatedTkcsName || h.tkcsName
+                communeName: updatedCommuneName,
+                communeCode: updatedCommuneCode,
+                tkcsCode: updatedTkcsCode,
+                tkcsName: updatedTkcsName
               });
             });
             await hhBatch.commit();
@@ -414,6 +746,310 @@ export default function App() {
       console.error(err);
       showNotification('error', 'Có lỗi khi cập nhật thông tin.');
     }
+  };
+
+  // Helper to commit imported data to State, LocalStorage and Firebase
+  const executeFinalizeImport = async (
+    communeData: Commune,
+    areasData: SurveyArea[],
+    householdsData: Household[],
+    skippedSheetsList: { sheetName: string; reason: string }[],
+    totalCount: number,
+    isOverwrite: boolean,
+    oldCommuneIdsToRemove: string[] = []
+  ) => {
+    setUploadProgressText(`Đang lưu ${totalCount} hộ từ ${areasData.length} địa bàn...`);
+
+    // 1. Update State & LocalStorage immediately
+    setCommunes(prev => {
+      let next: Commune[];
+      if (isOverwrite) {
+        next = prev.filter(c => !oldCommuneIdsToRemove.includes(c.id)).concat([communeData]);
+      } else {
+        next = [...prev, communeData];
+      }
+      try { localStorage.setItem('cached_communes', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+
+    setAreas(prev => {
+      let next: SurveyArea[];
+      if (isOverwrite) {
+        next = prev.filter(a => !oldCommuneIdsToRemove.includes(a.communeId)).concat(areasData);
+      } else {
+        next = [...prev, ...areasData];
+      }
+      try { localStorage.setItem('cached_areas', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+
+    setHouseholds(prev => {
+      let next: Household[];
+      if (isOverwrite) {
+        next = prev.filter(h => !oldCommuneIdsToRemove.includes(h.communeId)).concat(householdsData);
+      } else {
+        next = [...prev, ...householdsData];
+      }
+      try { localStorage.setItem('cached_households', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+
+    setSelectedCommuneId(communeData.id);
+    setSelectedAreaId('ALL');
+    setCurrentPage(1);
+    setIsUploading(false);
+
+    if (skippedSheetsList.length > 0) {
+      setUploadReport({
+        validCount: areasData.length,
+        totalHouseholds: totalCount,
+        skippedSheets: skippedSheetsList
+      });
+      showNotification('success', isOverwrite 
+        ? `Đã GHI ĐÈ thành công xã [${communeData.communeCode}] ${communeData.communeName}: ${totalCount} hộ (${areasData.length} địa bàn).`
+        : `Đã nạp thành công ${totalCount} hộ (${areasData.length} địa bàn). Tự động loại bỏ ${skippedSheetsList.length} sheet không đúng mẫu/trống.`
+      );
+    } else {
+      showNotification('success', isOverwrite 
+        ? `Đã GHI ĐÈ thành công dữ liệu xã [${communeData.communeCode}] ${communeData.communeName} (${areasData.length} địa bàn, ${totalCount} hộ).`
+        : `Đã import thành công ${totalCount} hộ từ toàn bộ ${areasData.length} địa bàn.`
+      );
+    }
+
+    // 2. Background Firestore write
+    setTimeout(async () => {
+      try {
+        if (isOverwrite && oldCommuneIdsToRemove.length > 0) {
+          const oldAreas = areas.filter(a => oldCommuneIdsToRemove.includes(a.communeId));
+          const oldHhs = households.filter(h => oldCommuneIdsToRemove.includes(h.communeId));
+          const toDeleteRefs = [
+            ...oldCommuneIdsToRemove.map(id => doc(db, 'communes', id)),
+            ...oldAreas.map(a => doc(db, 'surveyAreas', a.id)),
+            ...oldHhs.map(h => doc(db, 'households', h.id))
+          ];
+
+          for (let i = 0; i < toDeleteRefs.length; i += 300) {
+            const chunk = toDeleteRefs.slice(i, i + 300);
+            const batch = writeBatch(db);
+            chunk.forEach(r => batch.delete(r));
+            await batch.commit();
+          }
+        }
+
+        const allDocs = [
+          { ref: doc(db, 'communes', communeData.id), data: communeData },
+          ...areasData.map(a => ({ ref: doc(db, 'surveyAreas', a.id), data: a })),
+          ...householdsData.map(h => ({ ref: doc(db, 'households', h.id), data: h }))
+        ];
+
+        for (let i = 0; i < allDocs.length; i += 300) {
+          const chunk = allDocs.slice(i, i + 300);
+          const batch = writeBatch(db);
+          chunk.forEach(item => batch.set(item.ref, item.data));
+          await batch.commit();
+        }
+      } catch (bgErr) {
+        console.warn("Background Firebase sync warning:", bgErr);
+      }
+    }, 100);
+  };
+
+  const handleConfirmOverwriteCommune = async () => {
+    if (!pendingDuplicateCommune) return;
+    const { existingCommune, newCommuneData, tempAreas, tempHouseholds, skippedSheets, totalParsed } = pendingDuplicateCommune;
+
+    const targetCommuneId = existingCommune.id;
+
+    // Re-bind areas and households to targetCommuneId
+    const reboundAreas: SurveyArea[] = tempAreas.map(a => ({
+      ...a,
+      id: 'area-' + targetCommuneId + '-' + a.code,
+      communeId: targetCommuneId
+    }));
+
+    const reboundHouseholds: Household[] = tempHouseholds.map((h, idx) => ({
+      ...h,
+      id: 'hh-' + targetCommuneId + '-' + (h.areaCode || '001') + '-' + (idx + 1),
+      communeId: targetCommuneId,
+      areaId: 'area-' + targetCommuneId + '-' + (h.areaCode || '001'),
+      communeCode: newCommuneData.communeCode,
+      communeName: newCommuneData.communeName,
+      tkcsCode: newCommuneData.tkcsCode || existingCommune.tkcsCode,
+      tkcsName: newCommuneData.tkcsName || existingCommune.tkcsName
+    }));
+
+    // Find all duplicate communes sharing this communeCode to clean them up simultaneously
+    const matchingDuplicateCommunes = communes.filter(c => 
+      c.id === targetCommuneId ||
+      (c.communeCode && newCommuneData.communeCode && c.communeCode.trim().toLowerCase() === newCommuneData.communeCode.trim().toLowerCase())
+    );
+    const oldCommuneIdsToRemove = matchingDuplicateCommunes.map(c => c.id);
+
+    const updatedCommune: Commune = {
+      ...existingCommune,
+      id: targetCommuneId,
+      communeCode: newCommuneData.communeCode,
+      communeName: newCommuneData.communeName,
+      tkcsCode: newCommuneData.tkcsCode || existingCommune.tkcsCode,
+      tkcsName: newCommuneData.tkcsName || existingCommune.tkcsName,
+      fileName: newCommuneData.fileName
+    };
+
+    setPendingDuplicateCommune(null);
+    await executeFinalizeImport(
+      updatedCommune,
+      reboundAreas,
+      reboundHouseholds,
+      skippedSheets,
+      totalParsed,
+      true,
+      oldCommuneIdsToRemove
+    );
+  };
+
+  const handleCancelDuplicateCommune = () => {
+    setPendingDuplicateCommune(null);
+    showNotification('error', 'Đã hủy thao tác nạp file. Không ghi đè và không tạo thêm xã trùng mã.');
+  };
+
+  // Group communes to detect duplicates for warning banner (trùng mã xã)
+  const duplicateCommunesDetected = useMemo(() => {
+    const dupIds = new Set<string>();
+    for (let i = 0; i < communes.length; i++) {
+      for (let j = i + 1; j < communes.length; j++) {
+        const c1 = communes[i];
+        const c2 = communes[j];
+        const sameCode = Boolean(c1.communeCode && c2.communeCode && c1.communeCode.trim().toLowerCase() === c2.communeCode.trim().toLowerCase());
+        if (sameCode) {
+          dupIds.add(c1.id);
+          dupIds.add(c2.id);
+        }
+      }
+    }
+    return Array.from(dupIds).map(id => communes.find(c => c.id === id)!).filter(Boolean);
+  }, [communes]);
+
+  // One-click deduplication for existing duplicate communes & redundant households
+  const handleDeduplicateCommunes = async () => {
+    setIsDeleting(true);
+    setDeleteProgressText('Đang kiểm tra và dọn dẹp các bản ghi xã trùng lặp...');
+
+    // Connected components clustering: communes sharing the same communeCode
+    const visited = new Set<string>();
+    const groups: Commune[][] = [];
+
+    communes.forEach(c => {
+      if (visited.has(c.id)) return;
+      const group: Commune[] = [c];
+      visited.add(c.id);
+
+      let added = true;
+      while (added) {
+        added = false;
+        communes.forEach(other => {
+          if (visited.has(other.id)) return;
+          const matches = group.some(g => {
+            return Boolean(g.communeCode && other.communeCode && g.communeCode.trim().toLowerCase() === other.communeCode.trim().toLowerCase());
+          });
+          if (matches) {
+            group.push(other);
+            visited.add(other.id);
+            added = true;
+          }
+        });
+      }
+      groups.push(group);
+    });
+
+    let duplicateCount = 0;
+    const keptCommunes: Commune[] = [];
+    const communesToRemoveIds: string[] = [];
+    const areasToRemoveIds: string[] = [];
+    const householdsToRemoveIds: string[] = [];
+
+    const nextHouseholds = [...households];
+    const nextAreas = [...areas];
+
+    groups.forEach(group => {
+      if (group.length === 1) {
+        keptCommunes.push(group[0]);
+        return;
+      }
+
+      duplicateCount += (group.length - 1);
+      const sorted = [...group].sort((a, b) => {
+        const countA = households.filter(h => h.communeId === a.id).length;
+        const countB = households.filter(h => h.communeId === b.id).length;
+        return countB - countA;
+      });
+
+      const primaryCommune = sorted[0];
+      keptCommunes.push(primaryCommune);
+
+      const secondaryCommunes = sorted.slice(1);
+      const secondaryIds = secondaryCommunes.map(c => c.id);
+      communesToRemoveIds.push(...secondaryIds);
+
+      // Re-assign or deduplicate areas
+      const groupAreas = nextAreas.filter(a => a.communeId === primaryCommune.id || secondaryIds.includes(a.communeId));
+      const seenAreaCodes = new Set<string>();
+      groupAreas.forEach(a => {
+        if (seenAreaCodes.has(a.code)) {
+          areasToRemoveIds.push(a.id);
+        } else {
+          seenAreaCodes.add(a.code);
+          a.communeId = primaryCommune.id;
+        }
+      });
+
+      // Deduplicate households: Keep 1 household per (areaCode + sttMau + headName)
+      const groupHouseholds = nextHouseholds.filter(h => h.communeId === primaryCommune.id || secondaryIds.includes(h.communeId));
+      const seenHhKeys = new Set<string>();
+      groupHouseholds.forEach(h => {
+        const hhKey = `${h.areaCode || '001'}_${h.sttMau || ''}_${(h.householdHead || '').trim().toLowerCase()}`;
+        if (seenHhKeys.has(hhKey)) {
+          householdsToRemoveIds.push(h.id);
+        } else {
+          seenHhKeys.add(hhKey);
+          h.communeId = primaryCommune.id;
+          h.communeCode = primaryCommune.communeCode;
+          h.communeName = primaryCommune.communeName;
+        }
+      });
+    });
+
+    const finalAreas = nextAreas.filter(a => !areasToRemoveIds.includes(a.id));
+    const finalHouseholds = nextHouseholds.filter(h => !householdsToRemoveIds.includes(h.id));
+
+    setCommunes(keptCommunes);
+    setAreas(finalAreas);
+    setHouseholds(finalHouseholds);
+
+    try { localStorage.setItem('cached_communes', JSON.stringify(keptCommunes)); } catch (e) {}
+    try { localStorage.setItem('cached_areas', JSON.stringify(finalAreas)); } catch (e) {}
+    try { localStorage.setItem('cached_households', JSON.stringify(finalHouseholds)); } catch (e) {}
+
+    showNotification('success', `Đã dọn dẹp thành công ${duplicateCount} bản ghi xã trùng lặp và loại bỏ ${householdsToRemoveIds.length} hộ dư thừa!`);
+    setIsDeleting(false);
+    setDeleteProgressText('');
+
+    setTimeout(async () => {
+      try {
+        const allDeletions = [
+          ...communesToRemoveIds.map(id => doc(db, 'communes', id)),
+          ...areasToRemoveIds.map(id => doc(db, 'surveyAreas', id)),
+          ...householdsToRemoveIds.map(id => doc(db, 'households', id))
+        ];
+        for (let i = 0; i < allDeletions.length; i += 300) {
+          const chunk = allDeletions.slice(i, i + 300);
+          const batch = writeBatch(db);
+          chunk.forEach(r => batch.delete(r));
+          await batch.commit();
+        }
+      } catch (e) {
+        console.warn("Background deduplication Firestore cleanup warning:", e);
+      }
+    }, 100);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -431,19 +1067,17 @@ export default function App() {
       setUploadProgressText(`Đã đọc xong file. Đang kiểm tra và xử lý ${workbook.SheetNames.length} sheet...`);
 
       const newCommuneId = 'commune-' + Date.now();
+      const existingCodes = communes.map(c => c.communeCode).filter(Boolean);
+      let nextCodeNum = 1;
+      while (existingCodes.includes(String(nextCodeNum).padStart(2, '0')) || existingCodes.includes(String(nextCodeNum))) {
+        nextCodeNum++;
+      }
+      const defaultAutoCode = String(nextCodeNum).padStart(2, '0');
+
       const communeNameFinal = formCommuneName.trim() || file.name.replace(/\.[^/.]+$/, "").replace(/[_]/g, " ");
-      const communeCodeFinal = formCommuneCode.trim() || '01';
+      const communeCodeFinal = formCommuneCode.trim() || defaultAutoCode;
       const tkcsCodeFinal = formTkcsCode.trim() || 'TKCS-01';
       const tkcsNameFinal = formTkcsName.trim() || 'Tổ TKCS';
-
-      const newCommune: Commune = {
-        id: newCommuneId,
-        tkcsCode: tkcsCodeFinal,
-        tkcsName: tkcsNameFinal,
-        communeCode: communeCodeFinal,
-        communeName: communeNameFinal,
-        fileName: file.name
-      };
 
       const tempAreas: SurveyArea[] = [];
       const tempHouseholds: Household[] = [];
@@ -828,80 +1462,377 @@ export default function App() {
         tempAreas.push(newArea);
       });
 
-      // Tự động điền tên/mã xã lên form cấu hình nếu người dùng chưa nhập
-      if (!formCommuneName.trim() && firstDetectedCommuneName) {
-        setFormCommuneName(firstDetectedCommuneName);
-      }
-      if (!formCommuneCode.trim() && firstDetectedCommuneCode) {
-        setFormCommuneCode(firstDetectedCommuneCode);
-      }
-
       if (totalParsed === 0) {
         setIsUploading(false);
         showNotification('error', `Không tìm thấy dòng hộ gia đình hợp lệ nào trong ${workbook.SheetNames.length} sheet. Vui lòng kiểm tra lại cấu trúc file Excel.`);
+        e.target.value = '';
         return;
       }
 
-      setUploadProgressText(`Hiển thị tức thì ${totalParsed} hộ từ ${tempAreas.length} địa bàn hợp lệ...`);
+      // Xác định chính xác Mã & Tên Xã cuối cùng (Ưu tiên form người dùng đã chọn/nhập -> phát hiện từ file -> tên file)
+      const resolvedCommuneName = formCommuneName.trim() || firstDetectedCommuneName || communeNameFinal;
+      const resolvedCommuneCode = formCommuneCode.trim() || firstDetectedCommuneCode || communeCodeFinal;
+      const resolvedTkcsCode = formTkcsCode.trim() || tkcsCodeFinal;
+      const resolvedTkcsName = formTkcsName.trim() || tkcsNameFinal;
 
-      // Optimistic instant UI update with localStorage persistence
-      setCommunes(prev => {
-        const next = [...prev, newCommune];
-        try { localStorage.setItem('cached_communes', JSON.stringify(next)); } catch (e) {}
-        return next;
-      });
-      setAreas(prev => {
-        const next = [...prev, ...tempAreas];
-        try { localStorage.setItem('cached_areas', JSON.stringify(next)); } catch (e) {}
-        return next;
-      });
-      setHouseholds(prev => {
-        const next = [...prev, ...tempHouseholds];
-        try { localStorage.setItem('cached_households', JSON.stringify(next)); } catch (e) {}
-        return next;
-      });
-      setSelectedCommuneId('ALL');
-      setSelectedAreaId('ALL');
-      setCurrentPage(1);
+      // Cập nhật lên form cấu hình
+      if (!formCommuneName.trim() && resolvedCommuneName) setFormCommuneName(resolvedCommuneName);
+      if (!formCommuneCode.trim() && resolvedCommuneCode) setFormCommuneCode(resolvedCommuneCode);
 
-      setIsUploading(false);
+      // Tìm xã tương ứng trong Danh mục xã (theo ID đã chọn hoặc Mã xã)
+      const existingCommune = communes.find(c => 
+        (selectedCatalogCommuneId && selectedCatalogCommuneId !== 'CUSTOM' && c.id === selectedCatalogCommuneId) ||
+        Boolean(c.communeCode && resolvedCommuneCode && c.communeCode.trim().toLowerCase() === resolvedCommuneCode.trim().toLowerCase())
+      );
 
-      // Show report if sheets were skipped
-      if (skippedSheets.length > 0) {
-        setUploadReport({
-          validCount: tempAreas.length,
-          totalHouseholds: totalParsed,
-          skippedSheets
-        });
-        showNotification('success', `Đã nạp thành công ${totalParsed} hộ (${tempAreas.length} địa bàn). Tự động loại bỏ ${skippedSheets.length} sheet không đúng mẫu/trống.`);
-      } else {
-        showNotification('success', `Đã import thành công ${totalParsed} hộ từ toàn bộ ${tempAreas.length} địa bàn.`);
+      const targetCommuneId = existingCommune ? existingCommune.id : newCommuneId;
+      const targetCommune: Commune = existingCommune ? {
+        ...existingCommune,
+        communeCode: resolvedCommuneCode,
+        communeName: resolvedCommuneName,
+        tkcsCode: resolvedTkcsCode || existingCommune.tkcsCode,
+        tkcsName: resolvedTkcsName || existingCommune.tkcsName,
+        fileName: file.name
+      } : {
+        id: targetCommuneId,
+        communeCode: resolvedCommuneCode,
+        communeName: resolvedCommuneName,
+        tkcsCode: resolvedTkcsCode,
+        tkcsName: resolvedTkcsName,
+        fileName: file.name
+      };
+
+      // Gắn chính xác ID địa bàn và hộ theo targetCommuneId
+      const finalizedAreas: SurveyArea[] = tempAreas.map(a => ({
+        ...a,
+        id: 'area-' + targetCommuneId + '-' + a.code,
+        communeId: targetCommuneId
+      }));
+
+      const finalizedHouseholds: Household[] = tempHouseholds.map((h, idx) => ({
+        ...h,
+        id: 'hh-' + targetCommuneId + '-' + (h.areaCode || '001') + '-' + (idx + 1),
+        communeId: targetCommuneId,
+        areaId: 'area-' + targetCommuneId + '-' + (h.areaCode || '001'),
+        communeCode: targetCommune.communeCode,
+        communeName: targetCommune.communeName,
+        tkcsCode: targetCommune.tkcsCode,
+        tkcsName: targetCommune.tkcsName
+      }));
+
+      // Ghi đè / cập nhật trực tiếp danh sách hộ cho xã này
+      await executeFinalizeImport(
+        targetCommune,
+        finalizedAreas,
+        finalizedHouseholds,
+        skippedSheets,
+        totalParsed,
+        true,
+        existingCommune ? [existingCommune.id] : []
+      );
+
+      // Tự động chuyển chọn xã và địa bàn vừa nạp
+      setSelectedCommuneId(targetCommuneId);
+      setSelectedTkcs(targetCommune.tkcsCode || 'ALL');
+      if (finalizedAreas.length > 0) {
+        setSelectedAreaId(finalizedAreas[0].id);
       }
-
-      // Background batch writing in safe chunks (max 300 items per batch)
-      setTimeout(async () => {
-        try {
-          const allDocs = [
-            { ref: doc(db, 'communes', newCommuneId), data: newCommune },
-            ...tempAreas.map(a => ({ ref: doc(db, 'surveyAreas', a.id), data: a })),
-            ...tempHouseholds.map(h => ({ ref: doc(db, 'households', h.id), data: h }))
-          ];
-
-          for (let i = 0; i < allDocs.length; i += 300) {
-            const chunk = allDocs.slice(i, i + 300);
-            const batch = writeBatch(db);
-            chunk.forEach(item => batch.set(item.ref, item.data));
-            await batch.commit();
-          }
-        } catch (bgErr) {
-          console.warn("Background Firebase sync warning:", bgErr);
-        }
-      }, 100);
 
     } catch (err) {
       console.error(err);
       setIsUploading(false);
-      showNotification('error', 'Lỗi đọc file Excel.');
+      showNotification('error', 'Lỗi khi đọc file Excel. Vui lòng kiểm tra lại định dạng file.');
+    }
+    e.target.value = '';
+  };
+
+  // Nạp bảng kê trực tiếp cho từng xã từ danh sách lưới
+  const handleUploadForCommune = async (commune: Commune, e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+
+    setIsUploading(true);
+    setUploadProgressText(`Đang đọc file bảng kê cho [${commune.communeCode}] ${commune.communeName}...`);
+
+    try {
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+
+      const tempAreas: SurveyArea[] = [];
+      const tempHouseholds: Household[] = [];
+      const skippedSheets: { sheetName: string; reason: string }[] = [];
+      let validAreaIndex = 0;
+      let totalParsed = 0;
+
+      workbook.SheetNames.forEach((sheetName) => {
+        const sheetNameClean = sheetName.trim();
+        const worksheet = workbook.Sheets[sheetName];
+        if (!worksheet) return;
+
+        const rows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+        if (!rows || rows.length < 2) return;
+
+        let headerRowIdx = -1;
+        let detectedAreaName = '';
+
+        for (let r = 0; r < Math.min(15, rows.length); r++) {
+          const row = rows[r] || [];
+          row.forEach((cellVal: any) => {
+            const str = String(cellVal || '').trim();
+            if (/Tên địa bàn:\s*([^\n\r_]+)/i.test(str)) {
+              const m = str.match(/Tên địa bàn:\s*[_]*([^\n\r_]+)/i);
+              if (m && m[1]) detectedAreaName = m[1].replace(/[_]/g, ' ').trim();
+            }
+          });
+          const rowText = row.map(c => String(c).toLowerCase().trim()).join(' ');
+          if (
+            (rowText.includes('họ và tên') || rowText.includes('chủ hộ') || rowText.includes('họ tên')) &&
+            (rowText.includes('địa chỉ') || rowText.includes('nhân kh') || rowText.includes('nhân khẩu') || rowText.includes('nguồn thu') || rowText.includes('stt') || rowText.includes('trạng thái'))
+          ) {
+            headerRowIdx = r;
+          }
+        }
+
+        const areaNameFinal = detectedAreaName || sheetNameClean;
+        const colIdx = {
+          sttMau: -1,
+          sampleStatus: -1,
+          sttGoc: -1,
+          headName: -1,
+          address: -1,
+          phone: -1,
+          members: -1,
+          sector: -1,
+          note: -1
+        };
+
+        if (headerRowIdx !== -1) {
+          const headerRow = rows[headerRowIdx] || [];
+          headerRow.forEach((val: any, idx: number) => {
+            const h = String(val || '').toLowerCase().trim();
+            if (h.includes('chính thức') || h.includes('dự phòng') || h.includes('loại mẫu') || h.includes('mẫu') || h.includes('trạng thái')) {
+              colIdx.sampleStatus = idx;
+            } else if (h.includes('stt mẫu') || (h === 'stt' && colIdx.sttMau === -1)) {
+              colIdx.sttMau = idx;
+            } else if (h.includes('stt gốc') || h.includes('mã hộ') || h.includes('số thứ tự')) {
+              colIdx.sttGoc = idx;
+            } else if (h.includes('họ và tên') || h.includes('họ tên') || h.includes('chủ hộ') || h.includes('tên chủ hộ')) {
+              colIdx.headName = idx;
+            } else if (h.includes('địa chỉ') || h.includes('thôn') || h.includes('xóm') || h.includes('tổ')) {
+              colIdx.address = idx;
+            } else if (h.includes('điện thoại') || h.includes('sđt') || h.includes('liên hệ')) {
+              colIdx.phone = idx;
+            } else if (h.includes('nhân khẩu') || h.includes('số người') || h.includes('thành viên') || h.includes('số nk')) {
+              colIdx.members = idx;
+            } else if (h.includes('nguồn thu') || h.includes('thu nhập') || h.includes('ngành') || h.includes('mã ngành')) {
+              colIdx.sector = idx;
+            } else if (h.includes('ghi chú') || h.includes('note')) {
+              colIdx.note = idx;
+            }
+          });
+        }
+
+        const startRow = headerRowIdx !== -1 ? headerRowIdx + 1 : 0;
+        const sheetHouseholds: any[] = [];
+        let sheetHouseholdCount = 0;
+
+        for (let r = startRow; r < rows.length; r++) {
+          const row = rows[r] || [];
+          if (!row || row.length === 0) continue;
+
+          let rawName = colIdx.headName >= 0 ? String(row[colIdx.headName] || '').trim() : '';
+          if (!rawName || /^\d+$/.test(rawName)) {
+            for (let c = 0; c < Math.min(row.length, 8); c++) {
+              const cand = String(row[c] || '').trim();
+              if (
+                cand.length >= 2 &&
+                !/^\d+$/.test(cand) &&
+                !cand.toUpperCase().includes('CHÍNH THỨC') &&
+                !cand.toUpperCase().includes('DỰ PHÒNG') &&
+                !cand.toLowerCase().includes('bảng kê') &&
+                !cand.toLowerCase().includes('điều tra') &&
+                !cand.toLowerCase().includes('họ và tên') &&
+                !cand.toLowerCase().includes('stt') &&
+                !cand.toLowerCase().includes('xã/phường') &&
+                !cand.toLowerCase().includes('tỉnh:')
+              ) {
+                const wordCount = cand.split(/\s+/).length;
+                if (wordCount >= 2 && !cand.toLowerCase().startsWith('xóm') && !cand.toLowerCase().startsWith('thôn') && !cand.toLowerCase().startsWith('tổ')) {
+                  rawName = cand;
+                  break;
+                }
+              }
+            }
+          }
+
+          if (!rawName || rawName.length < 2 || rawName.startsWith('(')) continue;
+          const upperName = rawName.toUpperCase();
+          if (
+            upperName.startsWith('(') || 
+            upperName === 'A' || upperName === 'B' || upperName === 'C' || 
+            upperName === 'D' || upperName === 'E' || upperName === '1' || upperName === '2' || 
+            upperName === '3' || upperName === '4' || upperName.includes('(A)') || 
+            upperName.includes('(B)') || upperName.includes('(1)') || upperName.includes('(2)')
+          ) {
+            continue;
+          }
+
+          const lowerName = rawName.toLowerCase();
+          if (
+            lowerName.includes('họ và tên') ||
+            lowerName.includes('bảng kê') ||
+            lowerName.includes('điều tra') ||
+            lowerName.includes('tổng số') ||
+            lowerName.includes('ubnd') ||
+            lowerName.includes('cộng hòa') ||
+            lowerName.includes('địa bàn:') ||
+            lowerName.includes('xã/phường:') ||
+            lowerName.includes('tỉnh:')
+          ) {
+            continue;
+          }
+
+          sheetHouseholdCount++;
+
+          let statusVal: 'CHÍNH THỨC' | 'DỰ PHÒNG' = 'CHÍNH THỨC';
+          const fullRowUpper = row.map(c => String(c || '').trim().toUpperCase()).join(' ');
+          if (fullRowUpper.includes('DỰ PHÒNG') || fullRowUpper.includes('DỰ PHONG') || fullRowUpper.includes('DP')) {
+            statusVal = 'DỰ PHÒNG';
+          }
+
+          let sttMauVal = colIdx.sttMau >= 0 ? String(row[colIdx.sttMau] || '').trim() : '';
+          if (!sttMauVal || !/^\d+$/.test(sttMauVal)) {
+            for (let c = 0; c < Math.min(row.length, 4); c++) {
+              const val = String(row[c] || '').trim();
+              if (/^\d+$/.test(val)) {
+                sttMauVal = val;
+                break;
+              }
+            }
+          }
+          if (!sttMauVal || !/^\d+$/.test(sttMauVal)) sttMauVal = String(sheetHouseholdCount);
+
+          let sttGocVal = colIdx.sttGoc >= 0 ? String(row[colIdx.sttGoc] || '').trim() : '';
+          if (!sttGocVal || !/^\d+$/.test(sttGocVal)) sttGocVal = sttMauVal;
+
+          let addressVal = colIdx.address >= 0 ? String(row[colIdx.address] || '').trim() : '';
+          if (!addressVal || addressVal === rawName || /^\d+$/.test(addressVal)) {
+            for (let c = 0; c < row.length; c++) {
+              const cand = String(row[c] || '').trim();
+              const candLower = cand.toLowerCase();
+              if (
+                candLower.includes('thôn') || candLower.includes('xóm') || candLower.includes('tổ') ||
+                candLower.includes('đội') || candLower.includes('số') || candLower.startsWith('x')
+              ) {
+                addressVal = cand;
+                break;
+              }
+            }
+          }
+          if (!addressVal || addressVal === rawName) addressVal = areaNameFinal;
+
+          let membersVal = colIdx.members >= 0 ? Number(row[colIdx.members]) : NaN;
+          if (isNaN(membersVal) || membersVal <= 0 || membersVal > 25) {
+            for (let c = 0; c < row.length; c++) {
+              const num = Number(row[c]);
+              if (!isNaN(num) && num >= 1 && num <= 20 && c !== colIdx.sttMau && c !== colIdx.sttGoc) {
+                membersVal = num;
+                break;
+              }
+            }
+          }
+          if (isNaN(membersVal) || membersVal <= 0) membersVal = 3;
+
+          let sectorVal = colIdx.sector >= 0 ? Number(row[colIdx.sector]) : NaN;
+          if (isNaN(sectorVal) || ![1, 2, 3, 4].includes(sectorVal)) sectorVal = 2;
+
+          let phoneVal = colIdx.phone >= 0 ? String(row[colIdx.phone] || '').trim() : '';
+          let noteVal = colIdx.note >= 0 ? String(row[colIdx.note] || '').trim() : '';
+
+          const tempHh: any = {
+            communeCode: commune.communeCode,
+            communeName: commune.communeName,
+            tkcsCode: commune.tkcsCode || '',
+            tkcsName: commune.tkcsName || '',
+            sttMau: sttMauVal,
+            sampleStatus: statusVal,
+            sttGoc: sttGocVal,
+            householdHead: rawName,
+            address: addressVal,
+            phone: phoneVal,
+            membersCount: membersVal,
+            workingMembersCount: Math.max(1, membersVal - 1),
+            sectorCode: sectorVal as 1 | 2 | 3 | 4,
+            sectorName: SECTOR_NAMES[sectorVal as 1 | 2 | 3 | 4] || 'Công nghiệp xây dựng',
+            note: noteVal,
+            surveyStatus: 'CHUA_NHAP',
+            assignedSurveyorId: '',
+            assignedSurveyorName: '',
+            questionnaire: createDefaultQuestionnaire()
+          };
+          sheetHouseholds.push(tempHh);
+        }
+
+        if (sheetHouseholdCount === 0) return;
+
+        validAreaIndex++;
+        const areaCode = String(validAreaIndex).padStart(3, '0');
+        const areaId = 'area-' + commune.id + '-' + areaCode;
+
+        const finalizedHouseholds: Household[] = sheetHouseholds.map((h, hIdx) => ({
+          ...h,
+          id: 'hh-' + commune.id + '-' + areaCode + '-' + (hIdx + 1),
+          areaId: areaId,
+          areaCode: areaCode
+        }));
+
+        tempHouseholds.push(...finalizedHouseholds);
+        totalParsed += finalizedHouseholds.length;
+
+        const newArea: SurveyArea = {
+          id: areaId,
+          communeId: commune.id,
+          code: areaCode,
+          name: areaNameFinal,
+          householdCount: finalizedHouseholds.length
+        };
+        tempAreas.push(newArea);
+      });
+
+      if (totalParsed === 0) {
+        setIsUploading(false);
+        showNotification('error', `Không tìm thấy dòng hộ gia đình hợp lệ nào trong ${workbook.SheetNames.length} sheet.`);
+        return;
+      }
+
+      const updatedCommune: Commune = {
+        ...commune,
+        fileName: file.name
+      };
+
+      await executeFinalizeImport(
+        updatedCommune,
+        tempAreas,
+        tempHouseholds,
+        skippedSheets,
+        totalParsed,
+        true,
+        [commune.id]
+      );
+
+      setSelectedCommuneId(commune.id);
+      setSelectedTkcs(commune.tkcsCode || 'ALL');
+      if (tempAreas.length > 0) {
+        setSelectedAreaId(tempAreas[0].id);
+      }
+
+      showNotification('success', `Đã nạp thành công ${totalParsed} hộ cho [${commune.communeCode}] ${commune.communeName} (${tempAreas.length} địa bàn).`);
+
+    } catch (err) {
+      console.error(err);
+      setIsUploading(false);
+      showNotification('error', 'Lỗi khi đọc file Excel.');
     }
     e.target.value = '';
   };
@@ -962,39 +1893,135 @@ export default function App() {
     return calculateFullIncome(h.questionnaire);
   };
 
+  // Danh sách xã thuộc phạm vi Tổng hợp nhanh đang xem
+  const tnhScopeCommunes = useMemo(() => {
+    if (tnhScopeMode === 'COMMUNE_QUICK' || tnhScopeMode === 'COMMUNE_SECTOR') {
+      if (tnhSelectedCommuneId !== 'ALL') {
+        const found = communes.find(c => c.id === tnhSelectedCommuneId || c.communeCode === tnhSelectedCommuneId);
+        return found ? [found] : communes;
+      }
+      if (selectedCommuneId !== 'ALL') {
+        const found = communes.find(c => c.id === selectedCommuneId || c.communeCode === selectedCommuneId);
+        return found ? [found] : communes;
+      }
+      return communes;
+    }
+    if (tnhScopeMode === 'TKCS_SECTOR') {
+      if (tnhSelectedTkcs !== 'ALL') {
+        return communes.filter(c => c.tkcsCode === tnhSelectedTkcs);
+      }
+      if (selectedTkcs !== 'ALL') {
+        return communes.filter(c => c.tkcsCode === selectedTkcs);
+      }
+      return communes;
+    }
+    // PROVINCE_SECTOR
+    return communes;
+  }, [communes, tnhScopeMode, tnhSelectedCommuneId, selectedCommuneId, tnhSelectedTkcs, selectedTkcs]);
+
+  // Hộ gia đình thuộc phạm vi Tổng hợp nhanh đang xem
   const tnhScopeHouseholds = useMemo(() => {
     if (tnhScopeMode === 'COMMUNE_QUICK' || tnhScopeMode === 'COMMUNE_SECTOR') {
       if (tnhSelectedCommuneId !== 'ALL') {
-        return households.filter(h => h.communeId === tnhSelectedCommuneId);
+        const target = communes.find(c => c.id === tnhSelectedCommuneId || c.communeCode === tnhSelectedCommuneId);
+        return households.filter(h => h.communeId === tnhSelectedCommuneId || (Boolean(target?.communeCode) && h.communeCode === target?.communeCode));
       }
       if (selectedCommuneId !== 'ALL') {
-        return households.filter(h => h.communeId === selectedCommuneId);
+        const target = communes.find(c => c.id === selectedCommuneId || c.communeCode === selectedCommuneId);
+        return households.filter(h => h.communeId === selectedCommuneId || (Boolean(target?.communeCode) && h.communeCode === target?.communeCode));
       }
       return households;
     }
     if (tnhScopeMode === 'TKCS_SECTOR') {
       if (tnhSelectedTkcs !== 'ALL') {
-        return households.filter(h => h.tkcsCode === tnhSelectedTkcs);
-      }
-      if (selectedTkcs !== 'ALL') {
-        return households.filter(h => h.tkcsCode === selectedTkcs);
+        const matchingCommuneCodes = new Set(communes.filter(c => c.tkcsCode === tnhSelectedTkcs).map(c => c.communeCode));
+        const matchingCommuneIds = new Set(communes.filter(c => c.tkcsCode === tnhSelectedTkcs).map(c => c.id));
+        return households.filter(h => h.tkcsCode === tnhSelectedTkcs || matchingCommuneCodes.has(h.communeCode) || matchingCommuneIds.has(h.communeId));
       }
       return households;
     }
     // PROVINCE_SECTOR
     return households;
-  }, [households, tnhScopeMode, tnhSelectedCommuneId, selectedCommuneId, tnhSelectedTkcs, selectedTkcs]);
+  }, [households, communes, tnhScopeMode, tnhSelectedCommuneId, selectedCommuneId, tnhSelectedTkcs, selectedTkcs]);
 
+  // Tính toán Tổng hợp nhanh kết nối chuẩn xác Danh mục Xã / TKCS và Phiếu điều tra thực tế
   const tnhSummary = useMemo(() => {
     const list = tnhScopeHouseholds;
     const officialList = list.filter(h => h.sampleStatus === 'CHÍNH THỨC' || !h.sampleStatus);
-    const totalHH = officialList.length;
+    const totalSurveyHH = officialList.length;
+
+    // Tổng hợp số liệu bảng kê & mẫu từ danh mục các xã trong phạm vi
+    let totalBkS1 = 0, totalBkS2 = 0, totalBkS3 = 0, totalBkS4 = 0, totalBkAll = 0;
+    let totalMauS1 = 0, totalMauS2 = 0, totalMauS3 = 0, totalMauS4 = 0, totalMauAll = 0;
+
+    tnhScopeCommunes.forEach(c => {
+      const oc = OFFICIAL_COMMUNES_CATALOG.find(item => item.communeCode === c.communeCode || item.id === c.id);
+      const s1 = c.bkNongLamThuySan ?? oc?.bkNongLamThuySan ?? 0;
+      const s2 = c.bkCongNghiepXayDung ?? oc?.bkCongNghiepXayDung ?? 0;
+      const s3 = c.bkThuongMaiDichVu ?? oc?.bkThuongMaiDichVu ?? 0;
+      const s4 = c.bkThuKhacLuong ?? oc?.bkThuKhacLuong ?? 0;
+      const tot = c.bkTongSo ?? oc?.bkTongSo ?? (s1 + s2 + s3 + s4);
+
+      totalBkS1 += s1;
+      totalBkS2 += s2;
+      totalBkS3 += s3;
+      totalBkS4 += s4;
+      totalBkAll += tot;
+
+      const m1 = c.mauNongLamThuySan ?? oc?.mauNongLamThuySan ?? 0;
+      const m2 = c.mauCongNghiepXayDung ?? oc?.mauCongNghiepXayDung ?? 0;
+      const m3 = c.mauThuongMaiDichVu ?? oc?.mauThuongMaiDichVu ?? 0;
+      const m4 = c.mauThuKhacLuong ?? oc?.mauThuKhacLuong ?? 0;
+      const mTot = c.mauTongSo ?? oc?.mauTongSo ?? (m1 + m2 + m3 + m4);
+
+      totalMauS1 += m1;
+      totalMauS2 += m2;
+      totalMauS3 += m3;
+      totalMauS4 += m4;
+      totalMauAll += mTot;
+    });
+
+    // Nếu là 1 xã đơn lẻ và có tỷ trọng % định sẵn trong danh mục thì ưu tiên lấy chính xác
+    const isSingleCommune = tnhScopeCommunes.length === 1;
+    const singleCommune = isSingleCommune ? tnhScopeCommunes[0] : null;
+    const singleCatalog = singleCommune ? OFFICIAL_COMMUNES_CATALOG.find(item => item.communeCode === singleCommune.communeCode || item.id === singleCommune.id) : null;
 
     const sectors = [1, 2, 3, 4] as const;
 
     const sectorData = sectors.map(code => {
+      let bkCount = 0;
+      let mauAlloc = 0;
+      let percent = 0;
+
+      if (code === 1) {
+        bkCount = totalBkS1;
+        mauAlloc = totalMauS1;
+        percent = isSingleCommune && singleCommune 
+          ? (singleCommune.ttNongLamThuySan ?? singleCatalog?.ttNongLamThuySan ?? (totalBkAll > 0 ? Number(((bkCount / totalBkAll) * 100).toFixed(2)) : 0))
+          : (totalBkAll > 0 ? Number(((bkCount / totalBkAll) * 100).toFixed(2)) : 0);
+      } else if (code === 2) {
+        bkCount = totalBkS2;
+        mauAlloc = totalMauS2;
+        percent = isSingleCommune && singleCommune 
+          ? (singleCommune.ttCongNghiepXayDung ?? singleCatalog?.ttCongNghiepXayDung ?? (totalBkAll > 0 ? Number(((bkCount / totalBkAll) * 100).toFixed(2)) : 0))
+          : (totalBkAll > 0 ? Number(((bkCount / totalBkAll) * 100).toFixed(2)) : 0);
+      } else if (code === 3) {
+        bkCount = totalBkS3;
+        mauAlloc = totalMauS3;
+        percent = isSingleCommune && singleCommune 
+          ? (singleCommune.ttThuongMaiDichVu ?? singleCatalog?.ttThuongMaiDichVu ?? (totalBkAll > 0 ? Number(((bkCount / totalBkAll) * 100).toFixed(2)) : 0))
+          : (totalBkAll > 0 ? Number(((bkCount / totalBkAll) * 100).toFixed(2)) : 0);
+      } else if (code === 4) {
+        bkCount = totalBkS4;
+        mauAlloc = totalMauS4;
+        percent = isSingleCommune && singleCommune 
+          ? (singleCommune.ttThuKhacLuong ?? singleCatalog?.ttThuKhacLuong ?? (totalBkAll > 0 ? Number(((bkCount / totalBkAll) * 100).toFixed(2)) : 0))
+          : (totalBkAll > 0 ? Number(((bkCount / totalBkAll) * 100).toFixed(2)) : 0);
+      }
+
+      // Kết quả từ phiếu điều tra thực tế
       const sList = officialList.filter(h => Number(h.sectorCode) === code);
-      const count = sList.length;
+      const surveyCount = sList.length;
       let groupIncome = 0;
       let groupMembers = 0;
 
@@ -1004,18 +2031,20 @@ export default function App() {
         groupMembers += (h.membersCount || 1);
       });
 
-      const percent = totalHH > 0 ? Number(((count / totalHH) * 100).toFixed(1)) : 0;
-      // Formula on image: K = (=G12 / F12 / 12) = (Total Income / Total Members / 12)
+      // TNBQ đầu người / tháng theo loại hộ (= Tổng TN nhóm / Tổng số thành viên nhóm / 12) (Nghìn đồng)
       const perCapitaMonth = groupMembers > 0 ? (groupIncome / groupMembers / 12) : 0;
-      // Formula on image: G = (E * K)
+      
+      // Suy rộng TNBQ = Tỉ trọng cơ cấu (%) * Thu nhập bình quân đầu người / tháng theo loại hộ
+      // (= (percent / 100) * perCapitaMonth)
       const extrapolatedIncomeYear = (percent / 100) * perCapitaMonth;
 
       return {
         code,
         name: SECTOR_NAMES[code],
-        count,
+        bkCount,
         percent,
-        allocationTarget: count,
+        mauAlloc,
+        surveyCount,
         groupMembers,
         groupIncome,
         extrapolatedIncomeYear: Math.round(extrapolatedIncomeYear),
@@ -1025,21 +2054,105 @@ export default function App() {
       };
     });
 
+    // Suy rộng TNBQ toàn xã / TKCS = Tổng cộng (Suy rộng của 4 loại hộ)
     const overallExtrapolated = sectorData.reduce((acc, s) => acc + s.extrapolatedIncomeYear, 0);
-    const totalMembers = officialList.reduce((sum, h) => sum + (h.membersCount || 1), 0);
+    const totalMembers = sectorData.reduce((sum, s) => sum + s.groupMembers, 0);
     const totalIncomeAll = sectorData.reduce((acc, s) => acc + s.groupIncome, 0);
-    const overallPerCapitaMonth = totalMembers > 0 ? Math.round(totalIncomeAll / totalMembers / 12) : 0;
+    const overallDirectPerCapita = totalMembers > 0 ? Math.round(totalIncomeAll / totalMembers / 12) : 0;
 
     return {
-      totalHH,
+      totalBkHH: totalBkAll,
+      totalAllocMau: totalMauAll,
+      totalHH: totalSurveyHH,
       totalIncomeAll,
       totalMembers,
       sectorData,
       overallExtrapolated,
-      overallPerCapitaMonth,
-      officialList
+      overallPerCapitaMonth: overallExtrapolated > 0 ? overallExtrapolated : overallDirectPerCapita,
+      overallDirectPerCapita,
+      officialList,
+      scopeCommunesCount: tnhScopeCommunes.length
     };
-  }, [tnhScopeHouseholds]);
+  }, [tnhScopeCommunes, tnhScopeHouseholds]);
+
+  // Tổng hợp nhanh số liệu cho từng xã trong danh mục đầy đủ 19 cột để link trực tiếp
+  const communesTnhOverview = useMemo(() => {
+    return communes.map((c, idx) => {
+      const oc = OFFICIAL_COMMUNES_CATALOG.find(item => item.communeCode === c.communeCode || item.id === c.id);
+      const mergedCommune: Commune = {
+        ...oc,
+        ...c,
+        bkNongLamThuySan: c.bkNongLamThuySan ?? oc?.bkNongLamThuySan ?? 0,
+        bkCongNghiepXayDung: c.bkCongNghiepXayDung ?? oc?.bkCongNghiepXayDung ?? 0,
+        bkThuongMaiDichVu: c.bkThuongMaiDichVu ?? oc?.bkThuongMaiDichVu ?? 0,
+        bkThuKhacLuong: c.bkThuKhacLuong ?? oc?.bkThuKhacLuong ?? 0,
+        bkTongSo: c.bkTongSo ?? oc?.bkTongSo ?? 0,
+        ttNongLamThuySan: c.ttNongLamThuySan ?? oc?.ttNongLamThuySan ?? 0,
+        ttCongNghiepXayDung: c.ttCongNghiepXayDung ?? oc?.ttCongNghiepXayDung ?? 0,
+        ttThuongMaiDichVu: c.ttThuongMaiDichVu ?? oc?.ttThuongMaiDichVu ?? 0,
+        ttThuKhacLuong: c.ttThuKhacLuong ?? oc?.ttThuKhacLuong ?? 0,
+        ttTongSo: c.ttTongSo ?? oc?.ttTongSo ?? 0,
+        mauNongLamThuySan: c.mauNongLamThuySan ?? oc?.mauNongLamThuySan ?? 0,
+        mauCongNghiepXayDung: c.mauCongNghiepXayDung ?? oc?.mauCongNghiepXayDung ?? 0,
+        mauThuongMaiDichVu: c.mauThuongMaiDichVu ?? oc?.mauThuongMaiDichVu ?? 0,
+        mauThuKhacLuong: c.mauThuKhacLuong ?? oc?.mauThuKhacLuong ?? 0,
+        mauTongSo: c.mauTongSo ?? oc?.mauTongSo ?? 0,
+        mauDuPhong: c.mauDuPhong ?? 0,
+      };
+
+      const cHouseholds = households.filter(h => h.communeId === c.id || (Boolean(c.communeCode) && h.communeCode === c.communeCode));
+      const officialHHs = cHouseholds.filter(h => h.sampleStatus === 'CHÍNH THỨC' || !h.sampleStatus);
+      const totalHH = cHouseholds.length;
+      const officialCount = officialHHs.length;
+
+      // Group areas
+      const cAreas = areas.filter(a => a.communeId === c.id || (Boolean(c.communeCode) && (a as any).communeCode === c.communeCode));
+
+      // Calculate total income and members
+      let totalIncome = 0;
+      let totalMembers = 0;
+      officialHHs.forEach(h => {
+        totalIncome += calculateHouseholdTotalIncome(h).total;
+        totalMembers += (h.membersCount || 1);
+      });
+
+      // Sectors breakdown
+      const s1 = officialHHs.filter(h => Number(h.sectorCode) === 1).length;
+      const s2 = officialHHs.filter(h => Number(h.sectorCode) === 2).length;
+      const s3 = officialHHs.filter(h => Number(h.sectorCode) === 3).length;
+      const s4 = officialHHs.filter(h => Number(h.sectorCode) === 4).length;
+
+      const perCapitaMonth = totalMembers > 0 ? Math.round(totalIncome / totalMembers / 12) : 0;
+
+      return {
+        commune: mergedCommune,
+        stt: idx + 1,
+        areasCount: cAreas.length,
+        totalHH,
+        officialCount,
+        backupCount: totalHH - officialCount,
+        totalIncome,
+        totalMembers,
+        perCapitaMonth,
+        sectors: { s1, s2, s3, s4 }
+      };
+    });
+  }, [communes, households, areas]);
+
+  const filteredCommunesTnhOverview = useMemo(() => {
+    return communesTnhOverview.filter(item => {
+      if (selectedTkcs !== 'ALL' && item.commune.tkcsCode !== selectedTkcs) return false;
+      if (selectedCommuneId !== 'ALL' && item.commune.id !== selectedCommuneId && item.commune.communeCode !== selectedCommuneId) return false;
+      if (searchKeyword.trim()) {
+        const q = searchKeyword.toLowerCase().trim();
+        const matchName = item.commune.communeName.toLowerCase().includes(q);
+        const matchCode = item.commune.communeCode.toLowerCase().includes(q);
+        const matchTkcs = item.commune.tkcsName?.toLowerCase().includes(q) || item.commune.tkcsCode.toLowerCase().includes(q);
+        if (!matchName && !matchCode && !matchTkcs) return false;
+      }
+      return true;
+    });
+  }, [communesTnhOverview, selectedTkcs, selectedCommuneId, searchKeyword]);
 
   const handleSaveQuestionnaire = async (updatedHousehold: any) => {
     if (!updatedHousehold) return;
@@ -1573,13 +2686,12 @@ export default function App() {
   const handleExportExcel = () => {
     const wb = XLSX.utils.book_new();
     const wsData: any[][] = [
-      ['BẢNG KÊ HỘ CHỌN MẪU ĐIỀU TRA', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
-      ['ĐIỀU TRA THU NHẬP BÌNH QUÂN ĐẦU NGƯỜI CẤP XÃ', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
-      [`Tỉnh: ---`, `Xã/phường: ${currentCommune?.communeName || formCommuneName || '---'}`, `Mã xã: ${currentCommune?.communeCode || formCommuneCode || '---'}`, `TKCS: ${currentCommune?.tkcsName || formTkcsName || '---'}`, '', '', '', '', '', '', '', '', '', '', '', ''],
+      ['DANH SÁCH BẢNG KÊ HỘ MẪU ĐIỀU TRA THU NHẬP CẤP XÃ', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+      [`Xã/phường: ${currentCommune?.communeName || formCommuneName || '---'}`, `Mã xã: ${currentCommune?.communeCode || formCommuneCode || '---'}`, `TKCS: ${currentCommune?.tkcsName || formTkcsName || '---'}`, '', '', '', '', '', '', '', '', '', '', '', '', ''],
       [],
       [
         'STT Mẫu', 'Mã TKCS', 'Tên TKCS', 'Mã Xã', 'Tên Xã', 'Mã ĐB', 'Tên Địa bàn (Sheet)',
-        'Trạng thái mẫu', 'STT gốc', 'Họ và tên chủ hộ', 'Địa chỉ của hộ', 'Số nhân khẩu',
+        'Trạng thái', 'STT gốc', 'Họ và tên chủ hộ', 'Địa chỉ của hộ', 'Số nhân khẩu',
         'Nguồn thu (1-4)', 'Phân loại ngành', 'Ghi chú (SĐT)', 'Tổng thu nhập (1.000 đ)'
       ]
     ];
@@ -1594,7 +2706,7 @@ export default function App() {
         h.communeName || formCommuneName || '',
         h.areaCode || '001',
         h.areaName || 'Địa bàn',
-        h.sampleStatus,
+        SURVEY_STATUS_LABELS[h.surveyStatus || 'CHUA_NHAP']?.label || 'Chưa nhập tin',
         h.sttGoc,
         h.householdHead,
         h.address,
@@ -1607,9 +2719,120 @@ export default function App() {
     });
 
     const ws = XLSX.utils.aoa_to_sheet(wsData);
-    XLSX.utils.book_append_sheet(wb, ws, "BangKeHo");
-    XLSX.writeFile(wb, `Bang_Ke_Ho_${currentCommune?.communeName || 'ToanXa'}.xlsx`);
-    showNotification('success', 'Đã xuất file Excel bảng kê đầy đủ các cột.');
+    XLSX.utils.book_append_sheet(wb, ws, "Bang_Ke_Ho_Mau");
+    XLSX.writeFile(wb, `Danh_Sach_Bang_Ke_Ho_Mau_${currentCommune?.communeName || 'ToanXa'}.xlsx`);
+    showNotification('success', 'Đã xuất file Excel danh sách Bảng kê Hộ mẫu.');
+  };
+
+  const handleExportEnteredQuestionnairesExcel = () => {
+    const wb = XLSX.utils.book_new();
+
+    // 1. Sheet Bảng kê Hộ mẫu
+    const wsDataBk: any[][] = [
+      ['DANH SÁCH BẢNG KÊ HỘ MẪU ĐÃ NHẬP TIN THU NHẬP HỘ GIA ĐÌNH'],
+      [],
+      [
+        'STT Mẫu', 'Mã TKCS', 'Tên TKCS', 'Mã Xã', 'Tên Xã', 'Mã ĐB', 'Tên Địa bàn',
+        'Trạng thái', 'STT gốc', 'Họ và tên chủ hộ', 'Địa chỉ', 'Số nhân khẩu',
+        'Phân loại ngành', 'Tổng thu nhập (1.000đ)', 'TNBQ/người/tháng (1.000đ)'
+      ]
+    ];
+
+    const exportList = filteredHouseholds.filter(h => h.surveyStatus === 'DA_HOAN_THANH' || h.surveyStatus === 'DA_DUYET' || h.surveyStatus === 'DANG_NHAP' || Boolean(h.questionnaire));
+    const listToExport = exportList.length > 0 ? exportList : filteredHouseholds;
+
+    listToExport.forEach(h => {
+      const inc = calculateHouseholdTotalIncome(h);
+      const perCapitaMonth = h.membersCount > 0 ? Math.round((inc.total / h.membersCount / 12) * 10) / 10 : 0;
+      wsDataBk.push([
+        h.sttMau,
+        h.tkcsCode || formTkcsCode || '',
+        h.tkcsName || formTkcsName || '',
+        h.communeCode || formCommuneCode || '',
+        h.communeName || formCommuneName || '',
+        h.areaCode || '001',
+        h.areaName || 'Địa bàn',
+        SURVEY_STATUS_LABELS[h.surveyStatus || 'CHUA_NHAP']?.label || 'Chưa nhập tin',
+        h.sttGoc,
+        h.householdHead,
+        h.address,
+        h.membersCount,
+        h.sectorName,
+        inc.total,
+        perCapitaMonth
+      ]);
+    });
+
+    const wsBk = XLSX.utils.aoa_to_sheet(wsDataBk);
+    XLSX.utils.book_append_sheet(wb, wsBk, "Bang_Ke_Ho_Mau");
+
+    // 2. Sheet Chi tiết Nội dung Phiếu Nhập
+    const wsDataPhieu: any[][] = [
+      ['NỘI DUNG CHI TIẾT PHIẾU ĐIỀU TRA THU NHẬP HỘ GIA ĐÌNH (PHỤ LỤC II)'],
+      [],
+      [
+        'STT', 
+        'Mã TKCS', 
+        'Tên TKCS', 
+        'Mã Xã', 
+        'Tên Xã', 
+        'Mã ĐB', 
+        'Tên Địa bàn', 
+        'STT Mẫu', 
+        'STT Gốc',
+        'Họ và tên chủ hộ', 
+        'Địa chỉ của hộ',
+        'Trạng thái nhập tin', 
+        'Số nhân khẩu',
+        'Phân loại ngành',
+        'Mục 1: Tiền lương & công (1.000đ)',
+        'Mục 2: Trồng trọt (1.000đ)',
+        'Mục 3: Chăn nuôi (1.000đ)',
+        'Mục 4: Lâm nghiệp (1.000đ)',
+        'Mục 5: Thủy sản (1.000đ)',
+        'Mục 6: Phi nông nghiệp (1.000đ)',
+        'Mục 7: Thu khác (1.000đ)',
+        'TỔNG THU NHẬP HỘ (1.000đ)',
+        'TNBQ/NGƯỜI/THÁNG (1.000đ)'
+      ]
+    ];
+
+    listToExport.forEach((h, idx) => {
+      const inc = calculateHouseholdTotalIncome(h);
+      const perCapitaMonth = h.membersCount > 0 ? Math.round((inc.total / h.membersCount / 12) * 10) / 10 : 0;
+
+      wsDataPhieu.push([
+        idx + 1,
+        h.tkcsCode || formTkcsCode || '',
+        h.tkcsName || formTkcsName || '',
+        h.communeCode || formCommuneCode || '',
+        h.communeName || formCommuneName || '',
+        h.areaCode || '001',
+        h.areaName || 'Địa bàn',
+        h.sttMau,
+        h.sttGoc,
+        h.householdHead,
+        h.address || '',
+        SURVEY_STATUS_LABELS[h.surveyStatus || 'CHUA_NHAP']?.label || 'Chưa nhập tin',
+        h.membersCount,
+        h.sectorName || '',
+        inc.muc1,
+        inc.muc2,
+        inc.muc3,
+        inc.muc4,
+        inc.muc5,
+        inc.muc6,
+        inc.muc7,
+        inc.total,
+        perCapitaMonth
+      ]);
+    });
+
+    const wsPhieu = XLSX.utils.aoa_to_sheet(wsDataPhieu);
+    XLSX.utils.book_append_sheet(wb, wsPhieu, "Chi_Tiet_Phieu_Da_Nhap");
+
+    XLSX.writeFile(wb, `Noi_Dung_Phieu_Nhap_${currentCommune?.communeName || 'DanhSachHo'}.xlsx`);
+    showNotification('success', `Đã xuất ${listToExport.length} phiếu hộ ra file Excel theo đúng nội dung phiếu nhập.`);
   };
 
   const handleExportExcelTNH = () => {
@@ -1628,10 +2851,10 @@ export default function App() {
     
     // Upper Summary Table Headers
     wsData.push([
-      'STT', 'Mã loại', 'Tên nhóm ngành nguồn thu lớn nhất', 'Tổng số hộ',
-      'Tỷ trọng cơ cấu (%)', 'Chỉ tiêu phân bổ mẫu chính thức',
-      'Suy rộng TNBQ xã/năm (=E*K)', 'Thu nhập bình quân đầu người/tháng (Nghìn đồng)',
-      'Tốc độ so 2025 (%)', 'TNBQ đầu người/tháng theo loại hộ (=G/F/12)'
+      'STT', 'Mã loại', 'Tên nhóm ngành nguồn thu lớn nhất', 'Tổng số hộ trong bảng kê',
+      'Tỷ trọng cơ cấu (%)', 'Chỉ tiêu phân bổ mẫu chính thức', 'Số hộ điều tra thực tế',
+      'TNBQ đầu người/tháng theo loại hộ (=G/F/12) (1.000 đ)',
+      'Suy rộng TNBQ (= Tỷ trọng % * TNBQ theo loại hộ) (1.000 đ)'
     ]);
 
     // Sector rows
@@ -1640,20 +2863,19 @@ export default function App() {
         idx + 1,
         s.code,
         s.name,
-        s.count,
+        s.bkCount,
         `${s.percent}%`,
-        s.count,
-        s.extrapolatedIncomeYear,
-        tnhSummary.overallPerCapitaMonth,
-        `${s.growthRate}%`,
-        s.perCapitaMonth
+        s.mauAlloc,
+        s.surveyCount,
+        s.perCapitaMonth,
+        s.extrapolatedIncomeYear
       ]);
     });
 
     // Total Row
     wsData.push([
-      '', 'TỔNG', 'TOÀN XÃ / PHẠM VI', tnhSummary.totalHH, '100%', tnhSummary.totalHH,
-      tnhSummary.overallExtrapolated, tnhSummary.overallPerCapitaMonth, '100%', tnhSummary.overallPerCapitaMonth
+      '', 'TỔNG', 'TOÀN BỘ PHẠM VI BÁO CÁO', tnhSummary.totalBkHH, '100%', tnhSummary.totalAllocMau,
+      tnhSummary.totalHH, tnhSummary.overallDirectPerCapita, tnhSummary.overallExtrapolated
     ]);
 
     wsData.push([]);
@@ -1698,7 +2920,7 @@ export default function App() {
   };
 
   // Reusable Household Table component with Sticky Header & Pagination
-  const renderHouseholdTable = (showEntryButton: boolean = true) => {
+  const renderHouseholdTable = (showEntryButton: boolean = true, customMaxHeight: string = 'max-h-[70vh]') => {
     const totalItems = filteredHouseholds.length;
     const actualPageSize = pageSize === -1 ? totalItems : pageSize;
     const totalPages = Math.max(1, Math.ceil(totalItems / (actualPageSize || 1)));
@@ -1730,40 +2952,40 @@ export default function App() {
     return (
       <div className="flex flex-col w-full">
         {/* Scrollable Container with Sticky Thead */}
-        <div className="overflow-x-auto overflow-y-auto max-h-[70vh] border border-slate-300 rounded-t shadow-xs bg-white relative">
+        <div className={`overflow-x-auto overflow-y-auto ${customMaxHeight} border border-slate-300 rounded-t shadow-xs bg-white relative`}>
           <table className="w-full border-collapse text-xs text-slate-800 whitespace-nowrap">
-            <thead className="sticky top-0 z-20 bg-sky-800 shadow-xs">
-              <tr className="bg-sky-800 text-white text-center font-bold">
+            <thead className="sticky top-0 z-20 bg-[#058da0] shadow-xs">
+              <tr className="bg-[#058da0] text-white text-center font-bold">
                 {showEntryButton && (
-                  <th className="border border-sky-900 px-2 py-2.5 w-10 text-center bg-sky-900 text-white font-semibold sticky top-0">
+                  <th className="border border-[#047484] px-2 py-2.5 w-10 text-center bg-[#058da0] text-white font-semibold sticky top-0">
                     <input 
                       type="checkbox" 
                       checked={isAllSelected}
                       onChange={handleToggleSelectAll}
-                      className="rounded text-sky-600 w-4 h-4 cursor-pointer"
+                      className="rounded text-teal-600 w-4 h-4 cursor-pointer"
                       title="Chọn tất cả các dòng trên trang này"
                     />
                   </th>
                 )}
-                <th className="border border-sky-900 px-2 py-2.5 bg-sky-900 text-white font-semibold sticky top-0">STT Mẫu</th>
-                <th className="border border-sky-900 px-2.5 py-2.5 bg-sky-900 text-white font-semibold sticky top-0">Mã TKCS</th>
-                <th className="border border-sky-900 px-3 py-2.5 bg-sky-900 text-white font-semibold text-left sticky top-0">Tên TKCS</th>
-                <th className="border border-sky-900 px-2.5 py-2.5 bg-sky-900 text-white font-semibold sticky top-0">Mã Xã</th>
-                <th className="border border-sky-900 px-3 py-2.5 bg-sky-900 text-white font-semibold text-left sticky top-0">Tên Xã</th>
-                <th className="border border-sky-900 px-3 py-2.5 bg-sky-900 text-white font-semibold sticky top-0">Mã ĐB</th>
-                <th className="border border-sky-900 px-4 py-2.5 bg-sky-900 text-white font-semibold text-left sticky top-0">Tên Địa bàn (Sheet)</th>
-                <th className="border border-sky-900 px-2.5 py-2.5 bg-sky-900 text-white font-semibold text-left sticky top-0">Người nhập / ĐTV</th>
-                <th className="border border-sky-900 px-2.5 py-2.5 bg-sky-900 text-white font-semibold text-center sticky top-0">Trạng thái phiếu</th>
-                <th className="border border-sky-900 px-2 py-2.5 bg-sky-900 text-white font-semibold sticky top-0">Mẫu</th>
-                <th className="border border-sky-900 px-2 py-2.5 bg-sky-900 text-white font-semibold sticky top-0">STT gốc</th>
-                <th className="border border-sky-900 px-3 py-2.5 text-left bg-sky-900 text-white font-semibold sticky top-0">Họ và tên chủ hộ</th>
-                <th className="border border-sky-900 px-3 py-2.5 text-left bg-sky-900 text-white font-semibold sticky top-0">Địa chỉ của hộ</th>
-                <th className="border border-sky-900 px-2 py-2.5 bg-sky-900 text-white font-semibold sticky top-0">Nhân khẩu</th>
-                <th className="border border-sky-900 px-2 py-2.5 bg-sky-900 text-white font-semibold sticky top-0">Nguồn thu (1-4)</th>
-                <th className="border border-sky-900 px-3 py-2.5 text-left bg-sky-900 text-white font-semibold sticky top-0">Phân loại ngành</th>
-                <th className="border border-sky-900 px-2.5 py-2.5 text-left bg-sky-900 text-white font-semibold sticky top-0">Ghi chú (SĐT)</th>
-                <th className="border border-sky-900 px-3 py-2.5 text-right bg-sky-900 text-white font-semibold sticky top-0">Tổng TN (1.000 đ)</th>
-                {showEntryButton && <th className="border border-sky-900 px-3 py-2.5 bg-sky-900 text-white font-semibold sticky top-0">Thao tác</th>}
+                <th className="border border-[#047484] px-2 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0">STT Mẫu</th>
+                <th className="border border-[#047484] px-2.5 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0">Mã TKCS</th>
+                <th className="border border-[#047484] px-3 py-2.5 bg-[#058da0] text-white font-semibold text-left sticky top-0">Tên TKCS</th>
+                <th className="border border-[#047484] px-2.5 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0">Mã Xã</th>
+                <th className="border border-[#047484] px-3 py-2.5 bg-[#058da0] text-white font-semibold text-left sticky top-0">Tên Xã</th>
+                <th className="border border-[#047484] px-3 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0">Mã ĐB</th>
+                <th className="border border-[#047484] px-4 py-2.5 bg-[#058da0] text-white font-semibold text-left sticky top-0">Tên Địa bàn (Sheet)</th>
+                <th className="border border-[#047484] px-2.5 py-2.5 bg-[#058da0] text-white font-semibold text-left sticky top-0">Người nhập / ĐTV</th>
+                <th className="border border-[#047484] px-2.5 py-2.5 bg-[#058da0] text-white font-semibold text-center sticky top-0">Trạng thái phiếu</th>
+                <th className="border border-[#047484] px-2 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0">Mẫu</th>
+                <th className="border border-[#047484] px-2 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0">STT gốc</th>
+                <th className="border border-[#047484] px-3 py-2.5 text-left bg-[#058da0] text-white font-semibold sticky top-0">Họ và tên chủ hộ</th>
+                <th className="border border-[#047484] px-3 py-2.5 text-left bg-[#058da0] text-white font-semibold sticky top-0">Địa chỉ của hộ</th>
+                <th className="border border-[#047484] px-2 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0">Nhân khẩu</th>
+                <th className="border border-[#047484] px-2 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0">Nguồn thu (1-4)</th>
+                <th className="border border-[#047484] px-3 py-2.5 text-left bg-[#058da0] text-white font-semibold sticky top-0">Phân loại ngành</th>
+                <th className="border border-[#047484] px-2.5 py-2.5 text-left bg-[#058da0] text-white font-semibold sticky top-0">Ghi chú (SĐT)</th>
+                <th className="border border-[#047484] px-3 py-2.5 text-right bg-[#058da0] text-white font-semibold sticky top-0">Tổng TN (1.000 đ)</th>
+                {showEntryButton && <th className="border border-[#047484] px-3 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0">Thao tác</th>}
               </tr>
             </thead>
             <tbody>
@@ -2026,10 +3248,10 @@ export default function App() {
             <div className="absolute inset-0 bg-linear-to-t from-sky-950 via-sky-950/60 to-transparent"></div>
             <div className="absolute inset-x-0 bottom-2 px-4 text-center">
               <h1 className="text-base font-black uppercase tracking-tight text-white drop-shadow-md">
-                Hệ thống Quản lý Nhập tin & Thống kê
+                Hệ thống Quản lý Nhập tin 
               </h1>
               <p className="text-xs text-sky-200 font-medium drop-shadow-sm mt-0.5">
-                Phiếu thu thập thông tin về thu nhập của hộ dân cư (Phụ lục II)
+                Nhập tin phiếu thu nhập hộ dân cư tỉnh Hưng Yên
               </p>
             </div>
           </div>
@@ -2092,18 +3314,18 @@ export default function App() {
               <span>Đăng nhập hệ thống</span>
             </button>
 
-            <div className="mt-1 pt-4 border-t border-slate-200 text-slate-600 text-[11px] leading-relaxed flex flex-col gap-1.5">
+            <div className="mt-1 pt-3 border-t border-slate-200 text-slate-600 text-[11px] leading-relaxed flex flex-col gap-1.5">
               <div className="flex items-center justify-between text-slate-800 font-bold">
                 <span className="flex items-center gap-1.5 text-sky-900 font-bold">
                   <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Hệ thống Bảo mật Thống kê</span>
+                  <span>Hệ thống Thống kê Thu nhập Hộ</span>
                 </span>
                 <span className="bg-sky-100 text-sky-900 px-2 py-0.5 rounded font-bold text-[10px] border border-sky-200">
-                  Phiên bản 2026
+                  Bảo mật Thống kê
                 </span>
               </div>
               <p className="text-slate-500 font-medium leading-normal">
-                Cơ sở dữ liệu đám mây Firebase đồng bộ tự động dành cho Cán bộ Quản lý & Điều tra viên cấp Xã.
+                Cơ sở dữ liệu đám mây Firebase đồng bộ tự động dành cho nhập tin phiếu thu nhập cấp Xã.
               </p>
             </div>
           </form>
@@ -2292,67 +3514,148 @@ export default function App() {
           )}
         </nav>
 
-        {/* Filter Toolbar */}
+        {/* Filter Toolbar - Bộ lọc dùng chung phân cấp chuẩn hóa */}
         <div className="bg-white border-b border-slate-300 px-3 md:px-5 py-2 shadow-xs flex flex-wrap items-center justify-between gap-2.5 text-xs w-full">
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* 1. TKCS */}
             <div className="flex items-center gap-1.5">
-              <span className="font-semibold text-slate-700">Tổ TKCS:</span>
+              <span className="font-bold text-slate-700">TKCS:</span>
               <select 
                 value={selectedTkcs} 
-                onChange={e => setSelectedTkcs(e.target.value)}
-                className="bg-sky-50 border border-slate-300 rounded px-2.5 py-1 text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-sky-600"
-              >
-                <option value="ALL">-- Tất cả TKCS --</option>
-                {Array.from(new Set(communes.map(c => c.tkcsCode).filter(Boolean))).map(code => {
-                  const comm = communes.find(c => c.tkcsCode === code);
-                  return <option key={code} value={code}>{code} - {comm?.tkcsName || ''}</option>;
-                })}
-              </select>
-            </div>
-
-            <div className="flex items-center gap-1.5">
-              <span className="font-semibold text-slate-700">Xã/Phường:</span>
-              <select 
-                value={selectedCommuneId} 
                 onChange={e => {
-                  setSelectedCommuneId(e.target.value);
-                  setSelectedAreaId('ALL');
+                  const val = e.target.value;
+                  setSelectedTkcs(val);
+                  setTnhSelectedTkcs(val);
+                  if (val !== 'ALL') {
+                    const currentObj = communes.find(c => c.id === selectedCommuneId);
+                    if (currentObj && currentObj.tkcsCode !== val) {
+                      setSelectedCommuneId('ALL');
+                      setTnhSelectedCommuneId('ALL');
+                      setSelectedAreaId('ALL');
+                    }
+                  }
                 }}
-                className="bg-sky-50 border border-slate-300 rounded px-2.5 py-1 text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-sky-600"
+                className="bg-sky-50 border border-slate-300 rounded px-2.5 py-1 text-slate-900 font-bold focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer max-w-[200px]"
               >
-                <option value="ALL">-- Tất cả các xã --</option>
-                {communes.map(c => (
-                  <option key={c.id} value={c.id}>[{c.communeCode}] {c.communeName}</option>
+                <option value="ALL">-- Tất cả TKCS ({uniqueTkcsList.length}) --</option>
+                {uniqueTkcsList.map(tk => (
+                  <option key={tk.code} value={tk.code}>
+                    [{tk.code}] {tk.name}
+                  </option>
                 ))}
               </select>
             </div>
 
+            {/* 2. Xã / Phường (Chỉ hiện các xã thuộc TKCS đã chọn) */}
             <div className="flex items-center gap-1.5">
-              <span className="font-semibold text-slate-700">Địa bàn điều tra (Mã 001...):</span>
+              <span className="font-bold text-slate-700">Xã/Phường:</span>
               <select 
-                value={selectedAreaId} 
-                onChange={e => setSelectedAreaId(e.target.value)}
-                className="bg-sky-50 border border-slate-300 rounded px-2.5 py-1 text-slate-800 font-medium focus:outline-none focus:ring-1 focus:ring-sky-600"
+                value={selectedCommuneId} 
+                onChange={e => {
+                  const val = e.target.value;
+                  setSelectedCommuneId(val);
+                  setTnhSelectedCommuneId(val);
+                  setSelectedAreaId('ALL');
+                  if (val !== 'ALL') {
+                    const comm = communes.find(c => c.id === val);
+                    if (comm?.tkcsCode) {
+                      setSelectedTkcs(comm.tkcsCode);
+                      setTnhSelectedTkcs(comm.tkcsCode);
+                    }
+                  }
+                }}
+                className="bg-sky-50 border border-slate-300 rounded px-2.5 py-1 text-slate-900 font-bold focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer max-w-[220px]"
               >
-                <option value="ALL">-- Tất cả địa bàn ({areas.length}) --</option>
-                {areas
-                  .filter(a => selectedCommuneId === 'ALL' || a.communeId === selectedCommuneId)
-                  .map(a => (
-                    <option key={a.id} value={a.id}>ĐB {a.code} - {a.name} ({a.householdCount || 0} hộ)</option>
+                <option value="ALL">
+                  {selectedTkcs === 'ALL' 
+                    ? `-- Tất cả các xã (${communes.length}) --` 
+                    : `-- Tất cả xã thuộc [${selectedTkcs}] (${communes.filter(c => c.tkcsCode === selectedTkcs).length}) --`}
+                </option>
+                {communes
+                  .filter(c => selectedTkcs === 'ALL' || c.tkcsCode === selectedTkcs)
+                  .map(c => (
+                    <option key={c.id} value={c.id}>
+                      [{c.communeCode}] {c.communeName}
+                    </option>
                   ))}
               </select>
             </div>
 
+            {/* 3. Địa bàn điều tra (Chỉ hiện các địa bàn thuộc Xã đã chọn) */}
+            <div className="flex items-center gap-1.5">
+              <span className="font-bold text-slate-700">Địa bàn:</span>
+              <select 
+                value={selectedAreaId} 
+                onChange={e => setSelectedAreaId(e.target.value)}
+                className="bg-sky-50 border border-slate-300 rounded px-2.5 py-1 text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer max-w-[220px]"
+              >
+                <option value="ALL">
+                  {selectedCommuneId !== 'ALL'
+                    ? `-- Tất cả ĐB của xã (${areas.filter(a => a.communeId === selectedCommuneId || (Boolean(currentCommune?.communeCode) && (a as any).communeCode === currentCommune?.communeCode)).length}) --`
+                    : selectedTkcs !== 'ALL'
+                    ? `-- Tất cả ĐB của TKCS (${areas.filter(a => {
+                        const comm = communes.find(c => c.id === a.communeId || c.communeCode === (a as any).communeCode);
+                        return comm?.tkcsCode === selectedTkcs;
+                      }).length}) --`
+                    : `-- Tất cả địa bàn (${areas.length}) --`}
+                </option>
+                {areas
+                  .filter(a => {
+                    if (selectedCommuneId !== 'ALL') {
+                      return a.communeId === selectedCommuneId || (Boolean(currentCommune?.communeCode) && (a as any).communeCode === currentCommune?.communeCode);
+                    }
+                    if (selectedTkcs !== 'ALL') {
+                      const comm = communes.find(c => c.id === a.communeId || c.communeCode === (a as any).communeCode);
+                      return comm?.tkcsCode === selectedTkcs;
+                    }
+                    return true;
+                  })
+                  .map(a => (
+                    <option key={a.id} value={a.id}>
+                      ĐB {a.code} - {a.name} ({a.householdCount || 0} hộ)
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            {/* 4. Tìm kiếm chung */}
             <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded px-2 py-0.5">
               <Search className="w-3.5 h-3.5 text-slate-400" />
               <input 
                 type="text" 
-                placeholder="Tìm theo chủ hộ, địa bàn..." 
+                placeholder="Tìm chủ hộ, xã, địa bàn..." 
                 value={searchKeyword}
                 onChange={e => setSearchKeyword(e.target.value)}
-                className="bg-transparent border-none text-xs focus:outline-none w-44"
+                className="bg-transparent border-none text-xs focus:outline-none w-44 font-medium"
               />
+              {searchKeyword && (
+                <button
+                  type="button"
+                  onClick={() => setSearchKeyword('')}
+                  className="text-slate-400 hover:text-slate-600 font-bold px-1"
+                >
+                  ✕
+                </button>
+              )}
             </div>
+
+            {(selectedTkcs !== 'ALL' || selectedCommuneId !== 'ALL' || selectedAreaId !== 'ALL' || searchKeyword) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedTkcs('ALL');
+                  setTnhSelectedTkcs('ALL');
+                  setSelectedCommuneId('ALL');
+                  setTnhSelectedCommuneId('ALL');
+                  setSelectedAreaId('ALL');
+                  setSearchKeyword('');
+                }}
+                className="text-sky-700 hover:text-sky-900 font-bold text-xs underline cursor-pointer"
+                title="Xóa bộ lọc để xem toàn bộ dữ liệu"
+              >
+                Đặt lại lọc
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
@@ -2371,10 +3674,18 @@ export default function App() {
             <button 
               onClick={handleExportExcel} 
               className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-800 text-xs font-semibold rounded border border-emerald-600 text-white flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-              title="Xuất Excel danh sách hộ đầy đủ"
+              title="Xuất Excel danh sách Bảng kê Hộ mẫu"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Xuất Excel Đầy Đủ</span>
+              <span>Xuất Bảng Kê</span>
+            </button>
+            <button 
+              onClick={handleExportEnteredQuestionnairesExcel} 
+              className="px-2.5 py-1 bg-teal-700 hover:bg-teal-600 active:bg-teal-800 text-xs font-semibold rounded border border-teal-600 text-white flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+              title="Xuất Excel đầy đủ thông tin nội dung các phiếu đã nhập tin"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Xuất Excel Phiếu Đã Nhập</span>
             </button>
             <button 
               onClick={() => window.print()} 
@@ -2393,169 +3704,245 @@ export default function App() {
 
         {/* TAB 1: IMPORT FILE EXCEL & CONFIG */}
         {activeTab === 'import' && (
-          <div className="flex flex-col gap-6 w-full">
+          <div className="flex flex-col gap-3 w-full">
             
-            {/* Top configuration box */}
-            <div className="bg-white rounded border border-slate-300 shadow-sm p-6 flex flex-col gap-5">
-              <div className="border-b border-slate-200 pb-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            {/* Header chuẩn hành chính gọn gàng (Đã loại bỏ bộ lọc trùng) */}
+            <div className="bg-white rounded-lg border border-slate-300 shadow-sm px-4 py-2.5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-sky-800 text-white rounded-lg shrink-0 shadow-2xs">
+                  <TableProperties className="w-4 h-4" />
+                </div>
                 <div>
-                  <h2 className="font-semibold text-slate-800 text-sm flex items-center gap-2">
-                    <Upload className="w-4 h-4 text-sky-700" />
-                    <span>Cấu hình Mã/Tên Xã, TKCS và Tải bảng kê hộ từ file Excel</span>
+                  <h2 className="font-extrabold text-slate-900 text-sm tracking-tight uppercase flex items-center gap-2">
+                    <span>Danh mục Xã & Tải Bảng kê Hộ mẫu</span>
+                    <span className="bg-sky-100 text-sky-800 text-xs px-2 py-0.5 rounded-full font-bold">
+                      {communes.length} xã/phường
+                    </span>
                   </h2>
-                </div>
-
-                {households.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button 
-                      onClick={handleUpdateCommuneMetadata}
-                      className="px-3 py-1.5 bg-sky-700 hover:bg-sky-600 active:bg-sky-800 text-white rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs self-start md:self-auto"
-                      title="Cập nhật lại Mã & Tên Xã, TKCS cho toàn bộ danh sách hộ đã nạp mà không cần tải lại file"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                      <span>Cập nhật Mã/Tên</span>
-                    </button>
-                    <button 
-                      onClick={() => setIsClearAllModalOpen(true)}
-                      className="px-3 py-1.5 bg-rose-700 hover:bg-rose-600 active:bg-rose-800 text-white rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs self-start md:self-auto"
-                      title="Xóa toàn bộ dữ liệu hiện tại để tải file Excel mới từ đầu"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      <span>Xóa dữ liệu để up lại file mới</span>
-                    </button>
+                  <div className="text-xs text-slate-500 font-medium flex items-center gap-3 mt-0.5">
+                    <span>Đã nạp số liệu: <strong className="text-emerald-700 font-bold">{communes.filter(c => households.some(h => h.communeId === c.id || (Boolean(c.communeCode) && (h as any).communeCode === c.communeCode))).length} / {communes.length} xã</strong></span>
+                    <span>•</span>
+                    <span>Tổng số hộ: <strong className="text-sky-900 font-bold">{households.length} hộ</strong> ({areas.length} địa bàn)</span>
                   </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs bg-sky-50 p-4 rounded border border-sky-200">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Mã TKCS <span className="text-rose-600">*</span></label>
-                  <input 
-                    type="text" 
-                    value={formTkcsCode} 
-                    onChange={e => setFormTkcsCode(e.target.value)} 
-                    placeholder="Tự đặt mã TKCS..."
-                    className="w-full bg-white border border-slate-300 rounded p-2 text-slate-800 font-bold focus:ring-1 focus:ring-sky-600 focus:outline-none" 
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Tên TKCS <span className="text-rose-600">*</span></label>
-                  <input 
-                    type="text" 
-                    value={formTkcsName} 
-                    onChange={e => setFormTkcsName(e.target.value)} 
-                    placeholder="Tự đặt tên TKCS..."
-                    className="w-full bg-white border border-slate-300 rounded p-2 text-slate-800 font-medium focus:ring-1 focus:ring-sky-600 focus:outline-none" 
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Mã Xã <span className="text-rose-600">*</span></label>
-                  <input 
-                    type="text" 
-                    value={formCommuneCode} 
-                    onChange={e => setFormCommuneCode(e.target.value)} 
-                    placeholder="Tự đặt mã xã..."
-                    className="w-full bg-white border border-slate-300 rounded p-2 text-slate-800 font-bold focus:ring-1 focus:ring-sky-600 focus:outline-none" 
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Tên Xã <span className="text-rose-600">*</span></label>
-                  <input 
-                    type="text" 
-                    value={formCommuneName} 
-                    onChange={e => setFormCommuneName(e.target.value)} 
-                    placeholder="Tự đặt tên xã..."
-                    className="w-full bg-white border border-slate-300 rounded p-2 text-slate-800 font-bold focus:ring-1 focus:ring-sky-600 focus:outline-none" 
-                  />
                 </div>
               </div>
 
-              {/* Upload Drag & Drop Box */}
-              <div className="border-2 border-dashed border-sky-300 rounded-lg p-6 text-center bg-sky-50/40 hover:bg-sky-50 transition-colors flex flex-col items-center justify-center gap-2">
-                <div className="bg-sky-100 p-2.5 rounded-full text-sky-700">
-                  <FileSpreadsheet className="w-7 h-7" />
+              {households.length > 0 && (
+                <button 
+                  onClick={() => setIsClearAllModalOpen(true)}
+                  className="px-2.5 py-1 bg-rose-700 hover:bg-rose-600 text-white rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors self-start md:self-auto"
+                  title="Xóa toàn bộ dữ liệu hộ điều tra đã nạp"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Xóa dữ liệu hộ</span>
+                </button>
+              )}
+            </div>
+
+            {/* PHẦN TRÊN: BẢNG LƯỚI 6 CỘT DANH MỤC XÃ (Gọn 7-8 dòng, có thanh cuộn) */}
+            <div className="bg-white rounded-lg border border-slate-300 shadow-sm overflow-hidden flex flex-col">
+              <div className="bg-[#058da0] text-white px-3.5 py-2.5 border-b border-[#047484] flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Building2 className="w-4 h-4 text-cyan-200" />
+                  <span className="font-extrabold text-white text-xs uppercase tracking-wide">
+                    1. Danh mục Xã & Tải danh sách Bảng kê Hộ mẫu ({filteredCommunesForImport.length} xã)
+                  </span>
                 </div>
-                <div>
-                  <p className="font-semibold text-slate-800 text-sm">Chọn file Excel bảng kê danh sách hộ (.xlsx, .xls)</p>
-                </div>
-                <label className="mt-1 px-4 py-2 bg-sky-700 hover:bg-sky-600 text-white rounded text-xs font-semibold shadow-xs cursor-pointer flex items-center gap-1.5">
-                  <Upload className="w-4 h-4" />
-                  <span>Chọn file Excel để tải bảng kê lên</span>
-                  <input type="file" accept=".xlsx, .xls" onChange={handleFileUpload} className="hidden" />
-                </label>
+                <span className="text-[11px] text-cyan-100 font-medium italic hidden sm:inline">
+                  Cuộn để xem 104 xã/phường • Bấm dòng xã để xem danh sách hộ phía dưới
+                </span>
+              </div>
+
+              <div className="overflow-x-auto overflow-y-auto max-h-[290px]">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead className="sticky top-0 z-10 bg-[#058da0] shadow-2xs">
+                    <tr className="bg-[#058da0] text-white font-bold border-b border-[#047484] select-none uppercase text-[11px] tracking-wider">
+                      <th className="py-2.5 px-3 text-center border-r border-[#047484] w-12">STT</th>
+                      <th className="py-2.5 px-3.5 border-r border-[#047484] min-w-[170px]">Tên TKCS</th>
+                      <th className="py-2.5 px-2.5 text-center border-r border-[#047484] w-24">Mã TKCS</th>
+                      <th className="py-2.5 px-3.5 border-r border-[#047484] min-w-[190px]">Tên Xã, Phường</th>
+                      <th className="py-2.5 px-2.5 text-center border-r border-[#047484] w-28">Mã Xã</th>
+                      <th className="py-2.5 px-3 text-center min-w-[240px]">Tải bảng kê</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 font-medium">
+                    {filteredCommunesForImport.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="py-8 text-center text-slate-500 font-medium">
+                          Không tìm thấy đơn vị xã phù hợp với điều kiện tìm kiếm.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredCommunesForImport.map((c, idx) => {
+                        const communeHouseholds = households.filter(h => h.communeId === c.id || (Boolean(c.communeCode) && (h as any).communeCode === c.communeCode));
+                        const hhCount = communeHouseholds.length;
+                        const communeAreas = areas.filter(a => a.communeId === c.id || (Boolean(c.communeCode) && (a as any).communeCode === c.communeCode));
+                        const areaCount = communeAreas.length;
+                        const isLoaded = hhCount > 0;
+                        const isSelected = selectedCommuneId === c.id || (Boolean(c.communeCode) && currentCommune?.communeCode === c.communeCode);
+
+                        return (
+                          <tr 
+                            key={c.id || c.communeCode} 
+                            onClick={() => {
+                              setSelectedCommuneId(c.id);
+                              setSelectedTkcs(c.tkcsCode || 'ALL');
+                              setSelectedAreaId('ALL');
+                            }}
+                            className={`transition-colors cursor-pointer hover:bg-sky-100/60 ${
+                              isSelected 
+                                ? 'bg-sky-100/90 font-semibold border-l-4 border-l-sky-800' 
+                                : isLoaded 
+                                ? 'bg-emerald-50/40' 
+                                : idx % 2 === 1 ? 'bg-slate-50/40' : 'bg-white'
+                            }`}
+                          >
+                            <td className="py-2 px-3 text-center text-slate-500 font-bold border-r border-slate-200">
+                              {idx + 1}
+                            </td>
+                            <td className="py-2 px-3.5 font-bold text-slate-900 border-r border-slate-200">
+                              {c.tkcsName || c.tkcsCode}
+                            </td>
+                            <td className="py-2 px-2.5 text-center border-r border-slate-200">
+                              <span className="inline-block px-1.5 py-0.5 bg-sky-50 text-sky-800 font-bold font-mono rounded border border-sky-200 text-[11px]">
+                                {c.tkcsCode}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3.5 font-bold text-slate-900 border-r border-slate-200">
+                              {c.communeName}
+                            </td>
+                            <td className="py-2 px-2.5 text-center border-r border-slate-200">
+                              <span className="inline-block px-1.5 py-0.5 bg-slate-100 text-slate-700 font-bold font-mono rounded border border-slate-300 text-[11px]">
+                                {c.communeCode}
+                              </span>
+                            </td>
+                            <td className="py-1.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
+                              <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                {isLoaded ? (
+                                  <>
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded font-bold text-[11px] border border-emerald-300 shadow-2xs">
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                                      <span>{hhCount} hộ ({areaCount} ĐB)</span>
+                                    </span>
+
+                                    <label className="inline-flex items-center gap-1 px-2 py-0.5 bg-sky-700 hover:bg-sky-600 text-white rounded text-xs font-bold cursor-pointer transition-all shadow-2xs active:scale-95">
+                                      <Upload className="w-3 h-3" />
+                                      <span>Tải lại</span>
+                                      <input 
+                                        type="file" 
+                                        accept=".xlsx, .xls" 
+                                        onChange={(e) => handleUploadForCommune(c, e)} 
+                                        className="hidden" 
+                                      />
+                                    </label>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedCommuneId(c.id);
+                                        setSelectedTkcs(c.tkcsCode || 'ALL');
+                                        setSelectedAreaId('ALL');
+                                        setActiveTab('entry');
+                                        showNotification('success', `Đã mở danh sách hộ xã [${c.communeCode}] ${c.communeName}`);
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-white hover:bg-sky-100 text-sky-900 border border-sky-300 rounded text-xs font-semibold cursor-pointer transition-colors"
+                                      title="Xem danh sách hộ tại Tab 2 (Nhập tin)"
+                                    >
+                                      <FileText className="w-3 h-3 text-sky-700" />
+                                      <span>Nhập tin</span>
+                                    </button>
+                                  </>
+                                ) : (
+                                  <label className="inline-flex items-center gap-1.5 px-3 py-1 bg-sky-700 hover:bg-sky-600 text-white rounded text-xs font-bold cursor-pointer transition-all shadow-xs hover:scale-105 active:scale-95">
+                                    <Upload className="w-3.5 h-3.5" />
+                                    <span>Tải bảng kê</span>
+                                    <input 
+                                      type="file" 
+                                      accept=".xlsx, .xls" 
+                                      onChange={(e) => handleUploadForCommune(c, e)} 
+                                      className="hidden" 
+                                    />
+                                  </label>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 
-            {/* List of recognized sheets / survey areas */}
-            {areas.length > 0 && (
-              <div className="bg-white rounded border border-slate-300 shadow-sm p-4 flex flex-col gap-3">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                  <h3 className="font-bold text-slate-800 text-xs uppercase flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-emerald-700" />
-                    <span>Danh sách Địa bàn đã nhận diện từ các Sheet ({areas.length} địa bàn quy ước từ mã 001 đến {String(areas.length).padStart(3, '0')})</span>
-                  </h3>
-                  <span className="text-xs text-slate-500 font-medium">Tên sheet làm tên địa bàn</span>
-                </div>
-                
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 text-xs">
-                  {areas.map(a => (
-                    <div 
-                      key={a.id} 
-                      onClick={() => {
-                        setSelectedAreaId(a.id);
-                        showNotification('success', `Đã lọc hiển thị Địa bàn [${a.code}] - ${a.name}`);
-                      }}
-                      className={`p-2 rounded border cursor-pointer transition-all ${
-                        selectedAreaId === a.id 
-                          ? 'bg-emerald-100 border-emerald-400 font-bold text-emerald-950 shadow-xs' 
-                          : 'bg-slate-50 border-slate-200 hover:bg-emerald-50 hover:border-emerald-300'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="bg-emerald-800 text-white text-[10px] font-black px-1.5 py-0.5 rounded">
-                          {a.code}
-                        </span>
-                        <span className="text-[11px] font-medium text-slate-600">
-                          {a.householdCount || households.filter(h => h.areaId === a.id || h.areaCode === a.code).length} hộ
-                        </span>
-                      </div>
-                      <p className="mt-1 font-bold text-slate-800 truncate" title={a.name}>
-                        Sheet: {a.name}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Complete preview table directly on Tab 1 so user sees it right away! */}
-            <div className="bg-white rounded border border-slate-300 shadow-sm p-4 flex flex-col gap-3">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-slate-200 pb-3">
-                <div>
-                  <h3 className="font-semibold text-slate-800 text-sm flex items-center gap-2">
-                    <TableProperties className="w-4 h-4 text-sky-800" />
-                    <span>Bảng kê danh sách hộ đã tải lên ({filteredHouseholds.length} hộ)</span>
-                  </h3>
-                </div>
+            {/* PHẦN DƯỚI: BẢNG KÊ DANH SÁCH HỘ ĐIỀU TRA (Gọn 7-8 hộ, có thanh cuộn) */}
+            <div className="bg-white rounded-lg border border-slate-300 shadow-sm overflow-hidden flex flex-col">
+              <div className="bg-[#058da0] text-white px-3.5 py-2.5 border-b border-[#047484] flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-cyan-200" />
+                  <span className="font-extrabold text-white text-xs uppercase tracking-wide">
+                    2. Danh sách Bảng kê Hộ mẫu
+                  </span>
+                  {selectedCommuneId !== 'ALL' && currentCommune ? (
+                    <span className="px-2 py-0.5 bg-white/20 text-white border border-white/30 rounded font-bold text-xs">
+                      [{currentCommune.communeCode}] {currentCommune.communeName}
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 bg-white/20 text-white rounded font-bold text-xs">
+                      Tất cả các xã
+                    </span>
+                  )}
+                  <span className="text-xs text-cyan-100 font-bold">
+                    ({filteredHouseholds.length} hộ)
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {selectedCommuneId !== 'ALL' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCommuneId('ALL');
+                        setSelectedAreaId('ALL');
+                      }}
+                      className="px-2 py-1 bg-white/10 hover:bg-white/20 text-white border border-white/30 rounded text-xs font-semibold cursor-pointer transition-colors"
+                    >
+                      Xem toàn bộ hộ ({households.length})
+                    </button>
+                  )}
+
                   <button 
                     onClick={() => setActiveTab('entry')}
-                    className="px-3 py-1.5 bg-sky-700 hover:bg-sky-600 text-white rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded text-xs flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
                   >
                     <FileText className="w-3.5 h-3.5" />
-                    <span>Nhập tin phiếu</span>
+                    <span>Mở Nhập tin (Tab 2) ➔</span>
                   </button>
+
                   <button 
                     onClick={handleExportExcel}
-                    className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
+                    title="Xuất Bảng kê Hộ mẫu"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Xuất Excel</span>
+                    <span>Xuất Bảng Kê</span>
+                  </button>
+
+                  <button 
+                    onClick={handleExportEnteredQuestionnairesExcel}
+                    className="px-2.5 py-1 bg-teal-800 hover:bg-teal-700 text-white rounded text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
+                    title="Xuất file Excel đầy đủ nội dung các phiếu đã nhập tin"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                    <span>Xuất Excel Phiếu Đã Nhập</span>
                   </button>
                 </div>
               </div>
 
-              {renderHouseholdTable(true)}
+              {/* Bảng danh sách hộ dạng cuộn 7-8 dòng */}
+              <div>
+                {renderHouseholdTable(true, 'max-h-[310px]')}
+              </div>
             </div>
 
           </div>
@@ -2568,19 +3955,28 @@ export default function App() {
               <div>
                 <h2 className="font-bold text-slate-800 text-sm uppercase flex items-center gap-2">
                   <FileText className="w-4 h-4 text-sky-800" />
-                  <span>Danh sách bảng kê hộ & Nhập tin chi tiết Phụ lục II ({filteredHouseholds.length} hộ)</span>
+                  <span>Danh sách Bảng kê Hộ mẫu & Nhập tin chi tiết Phụ lục II ({filteredHouseholds.length} hộ)</span>
                 </h2>
                 <p className="text-xs text-slate-600 mt-0.5">
                   Phân công điều tra viên, theo dõi tiến độ nhập và bấm "Nhập tin phiếu" tại từng hộ để hoàn thiện phiếu thu thập.
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button 
                   onClick={handleExportExcel}
                   className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  title="Xuất danh sách Bảng kê Hộ mẫu"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>Xuất Excel Bảng Kê</span>
+                  <span>Xuất Excel Bảng Kê Hộ Mẫu</span>
+                </button>
+                <button 
+                  onClick={handleExportEnteredQuestionnairesExcel}
+                  className="px-3 py-1.5 bg-teal-800 hover:bg-teal-700 text-white rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  title="Xuất file Excel đầy đủ nội dung thông tin các phiếu đã nhập tin"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>Xuất Excel Phiếu Đã Nhập</span>
                 </button>
               </div>
             </div>
@@ -2730,202 +4126,516 @@ export default function App() {
 
         {/* TAB 3: TỔNG HỢP NHANH (TNH) */}
         {activeTab === 'tnh' && (
-          <div className="bg-white rounded border border-slate-300 shadow-sm flex flex-col gap-5 p-4 md:p-5">
-            {/* Header & 4 Mode Scope Filter Buttons */}
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-300 flex flex-col gap-3.5">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-200 pb-3">
-                <div>
-                  <h2 className="font-bold text-slate-800 text-sm flex items-center gap-2 uppercase tracking-wide">
-                    <BarChart3 className="w-5 h-5 text-sky-800" />
-                    <span>TỔNG HỢP NHANH SỐ LIỆU ĐIỀU TRA THU NHẬP (PHỤ LỤC II)</span>
-                  </h2>
-                  <p className="text-xs text-slate-600 mt-1">
-                    Công thức tính tự động chuẩn hóa theo đúng biểu mẫu vẽ tay thực tế.
-                  </p>
-                </div>
+          <div className="bg-white rounded border border-slate-300 shadow-sm flex flex-col gap-4 p-4 md:p-5">
+            {/* Header gọn gàng với nút Xuất Excel & Thông tin phạm vi */}
+            <div className="bg-slate-50 px-4 py-2.5 rounded-lg border border-slate-300 flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div>
+                <h2 className="font-bold text-slate-800 text-sm flex items-center gap-2 uppercase tracking-wide">
+                  <BarChart3 className="w-5 h-5 text-sky-800" />
+                  <span>TỔNG HỢP NHANH SỐ LIỆU ĐIỀU TRA THU NHẬP (PHỤ LỤC II)</span>
+                </h2>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Dữ liệu tự động liên kết theo Bộ lọc dùng chung hoặc khi bấm chọn trực tiếp vào TKCS / Xã ở Bảng 1 bên dưới.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <button 
                   onClick={handleExportExcelTNH}
-                  className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-800 text-white rounded text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs self-start md:self-auto transition-colors"
+                  className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-800 text-white rounded text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                  title="Xuất kết quả Tổng hợp nhanh ra file Excel"
                 >
                   <Download className="w-4 h-4" />
                   <span>Xuất Báo cáo Excel TNH</span>
                 </button>
               </div>
+            </div>
 
-              {/* 4 Scope Filter Mode Buttons */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setTnhScopeMode('COMMUNE_QUICK')}
-                  className={`p-3 rounded border text-xs font-bold text-left transition-all cursor-pointer flex items-center justify-between ${
-                    tnhScopeMode === 'COMMUNE_QUICK'
-                      ? 'bg-sky-800 text-white border-sky-900 shadow-md ring-2 ring-sky-300'
-                      : 'bg-white text-slate-800 border-slate-300 hover:bg-sky-50'
-                  }`}
-                >
-                  <span>1. Tổng hợp nhanh theo xã</span>
-                  <ChevronRight className={`w-4 h-4 ${tnhScopeMode === 'COMMUNE_QUICK' ? 'text-white' : 'text-slate-400'}`} />
-                </button>
+            {/* BẢNG 1: DANH MỤC XÃ & CHỈ TIÊU MẪU ĐIỀU TRA (19 CỘT THEO QUY CHUẨN) */}
+            <div className="bg-white border border-slate-300 rounded-lg shadow-sm overflow-hidden flex flex-col">
+              <div className="bg-[#058da0] text-white px-4 py-2.5 flex items-center justify-between gap-3 border-b border-[#047484]">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 bg-white/20 rounded text-amber-300 border border-white/30">
+                    <Building2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-xs md:text-sm uppercase tracking-wide flex items-center gap-2">
+                      <span>Bảng 1: Danh mục Xã & Chỉ tiêu Mẫu Điều tra</span>
+                      <span className="bg-amber-400 text-slate-950 px-2 py-0.5 rounded-full text-xs font-black">
+                        {filteredCommunesTnhOverview.length} xã
+                      </span>
+                    </h3>
+                  </div>
+                </div>
 
-                <button
-                  type="button"
-                  onClick={() => setTnhScopeMode('COMMUNE_SECTOR')}
-                  className={`p-3 rounded border text-xs font-bold text-left transition-all cursor-pointer flex items-center justify-between ${
-                    tnhScopeMode === 'COMMUNE_SECTOR'
-                      ? 'bg-sky-800 text-white border-sky-900 shadow-md ring-2 ring-sky-300'
-                      : 'bg-white text-slate-800 border-slate-300 hover:bg-sky-50'
-                  }`}
-                >
-                  <span>2. Tổng hợp loại hộ theo xã</span>
-                  <ChevronRight className={`w-4 h-4 ${tnhScopeMode === 'COMMUNE_SECTOR' ? 'text-white' : 'text-slate-400'}`} />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setTnhScopeMode('TKCS_SECTOR')}
-                  className={`p-3 rounded border text-xs font-bold text-left transition-all cursor-pointer flex items-center justify-between ${
-                    tnhScopeMode === 'TKCS_SECTOR'
-                      ? 'bg-sky-800 text-white border-sky-900 shadow-md ring-2 ring-sky-300'
-                      : 'bg-white text-slate-800 border-slate-300 hover:bg-sky-50'
-                  }`}
-                >
-                  <span>3. Tổng hợp loại hộ theo TKCS</span>
-                  <ChevronRight className={`w-4 h-4 ${tnhScopeMode === 'TKCS_SECTOR' ? 'text-white' : 'text-slate-400'}`} />
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setTnhScopeMode('PROVINCE_SECTOR')}
-                  className={`p-3 rounded border text-xs font-bold text-left transition-all cursor-pointer flex items-center justify-between ${
-                    tnhScopeMode === 'PROVINCE_SECTOR'
-                      ? 'bg-sky-800 text-white border-sky-900 shadow-md ring-2 ring-sky-300'
-                      : 'bg-white text-slate-800 border-slate-300 hover:bg-sky-50'
-                  }`}
-                >
-                  <span>4. Tổng hợp loại hộ theo Tỉnh</span>
-                  <ChevronRight className={`w-4 h-4 ${tnhScopeMode === 'PROVINCE_SECTOR' ? 'text-white' : 'text-slate-400'}`} />
-                </button>
+                <p className="text-[11px] text-cyan-100 hidden sm:block">
+                  Bấm vào <strong className="text-amber-300">Tên/Mã TKCS</strong> để xem TKCS, hoặc bấm <strong className="text-white">Tên/Mã Xã</strong> để xem xã
+                </p>
               </div>
 
-              {/* Filter Controls Bar */}
-              <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded border border-slate-200 text-xs">
-                <div className="flex items-center gap-3">
-                  {(tnhScopeMode === 'COMMUNE_QUICK' || tnhScopeMode === 'COMMUNE_SECTOR') && (
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-800">Chọn Xã / Phường:</span>
-                      <select
-                        value={tnhSelectedCommuneId}
-                        onChange={e => setTnhSelectedCommuneId(e.target.value)}
-                        className="bg-sky-50 border border-slate-300 rounded px-3 py-1 text-slate-900 font-bold focus:ring-1 focus:ring-sky-600 focus:outline-none"
-                      >
-                        <option value="ALL">-- Tất cả các xã ({communes.length}) --</option>
-                        {communes.map(c => (
-                          <option key={c.id} value={c.id}>[{c.communeCode}] {c.communeName}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+              {/* Table with all 19 columns + live linking */}
+              <div className="overflow-x-auto max-h-[380px] overflow-y-auto">
+                <table className="w-full border-collapse text-xs text-slate-800 text-center whitespace-nowrap">
+                  <thead className="sticky top-0 bg-[#058da0] text-white z-10 select-none shadow-sm">
+                    {/* Header Level 1 */}
+                    <tr className="bg-[#058da0] text-white font-bold text-[11px] uppercase tracking-wider">
+                      <th rowSpan={2} className="border border-[#047484] px-2 py-2 w-10 text-center">STT</th>
+                      <th rowSpan={2} className="border border-[#047484] px-3 py-2 text-left min-w-[150px] bg-[#046c7c] text-amber-200">
+                        Tên TKCS (Bấm chọn)
+                      </th>
+                      <th rowSpan={2} className="border border-[#047484] px-2 py-2 w-16 text-center bg-[#046c7c] text-amber-200">
+                        Mã TKCS
+                      </th>
+                      <th rowSpan={2} className="border border-[#047484] px-3 py-2 text-left min-w-[160px] bg-[#047a8c] text-cyan-100">
+                        Tên Xã, Phường (Bấm chọn)
+                      </th>
+                      <th rowSpan={2} className="border border-[#047484] px-2 py-2 w-16 text-center bg-[#047a8c] text-cyan-100">
+                        Mã Xã
+                      </th>
+                      
+                      {/* Group: Bảng kê trong xã (Hộ) */}
+                      <th colSpan={5} className="border border-[#047484] py-1 bg-[#047484] text-amber-200">
+                        Bảng kê trong xã (Hộ)
+                      </th>
+                      
+                      {/* Group: Tỷ trọng (%) */}
+                      <th colSpan={4} className="border border-[#047484] py-1 bg-[#046c7c] text-cyan-100">
+                        Tỷ trọng cơ cấu (%)
+                      </th>
+                      
+                      {/* Group: Mẫu chính thức */}
+                      <th colSpan={5} className="border border-[#047484] py-1 bg-[#047484] text-emerald-200">
+                        Mẫu chính thức (Phân bổ)
+                      </th>
+                      
+                      {/* Mẫu dự phòng */}
+                      <th rowSpan={2} className="border border-[#047484] px-2 py-2 w-14 bg-[#046c7c] text-amber-300">Mẫu DP</th>
+                      
+                      {/* Group: Kết quả thực tế & Tổng hợp nhanh */}
+                      <th colSpan={3} className="border border-[#047484] py-1 bg-[#035b69] text-emerald-100 font-bold">
+                        Liên kết Tổng hợp nhanh
+                      </th>
+                    </tr>
+                    
+                    {/* Header Level 2 */}
+                    <tr className="bg-[#047484] text-white font-semibold text-[10px]">
+                      {/* Bảng kê (5 cột) */}
+                      <th className="border border-[#035b69] px-2 py-1.5 min-w-[55px]">NLTS</th>
+                      <th className="border border-[#035b69] px-2 py-1.5 min-w-[55px]">CNXD</th>
+                      <th className="border border-[#035b69] px-2 py-1.5 min-w-[55px]">TMDV</th>
+                      <th className="border border-[#035b69] px-2 py-1.5 min-w-[55px]">Khác</th>
+                      <th className="border border-[#035b69] px-2.5 py-1.5 min-w-[65px] bg-[#035b69] text-amber-300 font-bold">Tổng BK</th>
+                      
+                      {/* Tỷ trọng (4 cột) */}
+                      <th className="border border-[#035b69] px-1.5 py-1.5 min-w-[50px]">% NLTS</th>
+                      <th className="border border-[#035b69] px-1.5 py-1.5 min-w-[50px]">% CNXD</th>
+                      <th className="border border-[#035b69] px-1.5 py-1.5 min-w-[50px]">% TMDV</th>
+                      <th className="border border-[#035b69] px-1.5 py-1.5 min-w-[50px]">% Khác</th>
+                      
+                      {/* Mẫu chính thức (5 cột) */}
+                      <th className="border border-[#035b69] px-1.5 py-1.5 min-w-[50px]">Mẫu 1</th>
+                      <th className="border border-[#035b69] px-1.5 py-1.5 min-w-[50px]">Mẫu 2</th>
+                      <th className="border border-[#035b69] px-1.5 py-1.5 min-w-[50px]">Mẫu 3</th>
+                      <th className="border border-[#035b69] px-1.5 py-1.5 min-w-[50px]">Mẫu 4</th>
+                      <th className="border border-[#035b69] px-2 py-1.5 min-w-[65px] bg-[#035b69] text-emerald-300 font-bold">Tổng Mẫu</th>
+                      
+                      {/* Liên kết TNH (3 cột) */}
+                      <th className="border border-[#035b69] px-2 py-1.5 min-w-[70px] bg-[#035b69] text-white font-bold">Hộ thực tế</th>
+                      <th className="border border-[#035b69] px-2.5 py-1.5 min-w-[110px] bg-[#035b69] text-emerald-200 font-bold text-right">TNBQ/tháng</th>
+                      <th className="border border-[#035b69] px-2 py-1.5 min-w-[130px] bg-[#035b69] text-white font-bold text-center">Liên kết bảng dưới</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 font-medium">
+                    {filteredCommunesTnhOverview.map((item, idx) => {
+                      const c = item.commune;
+                      const isCommuneSelected = (tnhScopeMode === 'COMMUNE_QUICK' || tnhScopeMode === 'COMMUNE_SECTOR') && (tnhSelectedCommuneId === c.id || tnhSelectedCommuneId === c.communeCode);
+                      const isTkcsSelected = tnhScopeMode === 'TKCS_SECTOR' && (tnhSelectedTkcs === c.tkcsCode);
 
-                  {tnhScopeMode === 'TKCS_SECTOR' && (
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-800">Chọn Mã TKCS:</span>
-                      <select
-                        value={tnhSelectedTkcs}
-                        onChange={e => setTnhSelectedTkcs(e.target.value)}
-                        className="bg-sky-50 border border-slate-300 rounded px-3 py-1 text-slate-900 font-bold focus:ring-1 focus:ring-sky-600 focus:outline-none"
-                      >
-                        <option value="ALL">-- Tất cả mã TKCS --</option>
-                        {Array.from(new Set(communes.map(c => c.tkcsCode).filter(Boolean))).map(code => (
-                          <option key={code} value={code}>Mã TKCS: {code}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
+                      return (
+                        <tr 
+                          key={c.id || c.communeCode} 
+                          onClick={() => {
+                            setTnhScopeMode('COMMUNE_SECTOR');
+                            setTnhSelectedCommuneId(c.id);
+                            setTnhSelectedTkcs(c.tkcsCode || 'ALL');
+                            setSelectedCommuneId(c.id);
+                            showNotification('success', `Đã liên kết số liệu Tổng hợp nhanh cho xã [${c.communeCode}] ${c.communeName}`);
+                          }}
+                          className={`transition-colors cursor-pointer hover:bg-sky-100/70 ${
+                            isCommuneSelected 
+                              ? 'bg-sky-100 font-bold border-l-4 border-l-sky-800 shadow-2xs' 
+                              : isTkcsSelected
+                              ? 'bg-amber-50/80 font-semibold border-l-2 border-l-amber-600'
+                              : item.totalHH > 0
+                              ? 'bg-emerald-50/30'
+                              : idx % 2 === 1 ? 'bg-slate-50/50' : 'bg-white'
+                          }`}
+                        >
+                          <td className="p-2 border border-slate-300 text-center font-medium bg-slate-50 text-slate-500">
+                            {idx + 1}
+                          </td>
 
-                  {tnhScopeMode === 'PROVINCE_SECTOR' && (
-                    <div className="flex items-center gap-2">
-                      <span className="px-3 py-1 bg-purple-100 text-purple-950 border border-purple-300 rounded font-bold">
-                        Phạm vi: Toàn Tỉnh ({communes.length} xã)
-                      </span>
-                    </div>
-                  )}
-                </div>
+                          {/* Tên & Mã TKCS - Bấm để chọn toàn bộ TKCS */}
+                          <td 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setTnhScopeMode('TKCS_SECTOR');
+                              setTnhSelectedTkcs(c.tkcsCode || 'ALL');
+                              setTnhSelectedCommuneId('ALL');
+                              setSelectedTkcs(c.tkcsCode || 'ALL');
+                              showNotification('success', `Đã liên kết số liệu Tổng hợp nhanh cho TKCS [${c.tkcsCode}] ${c.tkcsName || ''}`);
+                            }}
+                            className="p-2 border border-slate-300 text-left font-bold text-slate-900 hover:bg-amber-100/80 transition-colors group cursor-pointer"
+                            title={`Bấm vào đây để chọn TKCS [${c.tkcsCode}] ${c.tkcsName || ''} link xuống bảng dưới`}
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <span className={isTkcsSelected ? 'text-amber-950 font-black' : ''}>{c.tkcsName || c.tkcsCode}</span>
+                              <span className="opacity-0 group-hover:opacity-100 text-[10px] text-amber-800 bg-amber-100 px-1 py-0.2 rounded border border-amber-300">
+                                📍 Chọn TKCS
+                              </span>
+                            </div>
+                          </td>
+                          <td 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setTnhScopeMode('TKCS_SECTOR');
+                              setTnhSelectedTkcs(c.tkcsCode || 'ALL');
+                              setTnhSelectedCommuneId('ALL');
+                              setSelectedTkcs(c.tkcsCode || 'ALL');
+                              showNotification('success', `Đã liên kết số liệu Tổng hợp nhanh cho TKCS [${c.tkcsCode}] ${c.tkcsName || ''}`);
+                            }}
+                            className="p-2 border border-slate-300 text-center hover:bg-amber-100/80 cursor-pointer"
+                            title={`Bấm chọn TKCS [${c.tkcsCode}]`}
+                          >
+                            <span className={`inline-block px-1.5 py-0.5 font-mono font-bold rounded text-[11px] border ${
+                              isTkcsSelected 
+                                ? 'bg-amber-500 text-white border-amber-600' 
+                                : 'bg-sky-50 text-sky-800 border-sky-200'
+                            }`}>
+                              {c.tkcsCode}
+                            </span>
+                          </td>
 
-                <div className="text-slate-700 font-semibold">
-                  Tổng số hộ thuộc phạm vi báo cáo: <strong className="text-sky-900 font-extrabold">{tnhSummary.totalHH}</strong> hộ chính thức ({tnhSummary.totalMembers} nhân khẩu)
-                </div>
+                          {/* Tên & Mã Xã - Bấm để chọn Xã này */}
+                          <td 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setTnhScopeMode('COMMUNE_SECTOR');
+                              setTnhSelectedCommuneId(c.id);
+                              setTnhSelectedTkcs(c.tkcsCode || 'ALL');
+                              setSelectedCommuneId(c.id);
+                              showNotification('success', `Đã liên kết số liệu Tổng hợp nhanh cho xã [${c.communeCode}] ${c.communeName}`);
+                            }}
+                            className="p-2 border border-slate-300 text-left font-bold text-slate-900 hover:bg-sky-200/60 transition-colors group cursor-pointer"
+                            title={`Bấm vào đây để chọn xã [${c.communeCode}] ${c.communeName} link xuống bảng dưới`}
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <span className={isCommuneSelected ? 'text-sky-950 font-black' : ''}>{c.communeName}</span>
+                              <span className="opacity-0 group-hover:opacity-100 text-[10px] text-sky-800 bg-sky-100 px-1 py-0.2 rounded border border-sky-300">
+                                📍 Chọn Xã
+                              </span>
+                            </div>
+                          </td>
+                          <td 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setTnhScopeMode('COMMUNE_SECTOR');
+                              setTnhSelectedCommuneId(c.id);
+                              setTnhSelectedTkcs(c.tkcsCode || 'ALL');
+                              setSelectedCommuneId(c.id);
+                              showNotification('success', `Đã liên kết số liệu Tổng hợp nhanh cho xã [${c.communeCode}] ${c.communeName}`);
+                            }}
+                            className="p-2 border border-slate-300 text-center hover:bg-sky-200/60 cursor-pointer"
+                            title={`Bấm chọn xã [${c.communeCode}]`}
+                          >
+                            <span className={`inline-block px-1.5 py-0.5 font-mono font-bold rounded text-[11px] border ${
+                              isCommuneSelected 
+                                ? 'bg-sky-800 text-white border-sky-900' 
+                                : 'bg-slate-100 text-slate-700 border-slate-300'
+                            }`}>
+                              {c.communeCode}
+                            </span>
+                          </td>
+
+                          {/* Bảng kê trong xã (Hộ) */}
+                          <td className="p-2 border border-slate-300 text-center text-slate-700">{c.bkNongLamThuySan ?? '---'}</td>
+                          <td className="p-2 border border-slate-300 text-center text-slate-700">{c.bkCongNghiepXayDung ?? '---'}</td>
+                          <td className="p-2 border border-slate-300 text-center text-slate-700">{c.bkThuongMaiDichVu ?? '---'}</td>
+                          <td className="p-2 border border-slate-300 text-center text-slate-700">{c.bkThuKhacLuong ?? '---'}</td>
+                          <td className="p-2 border border-slate-300 text-center font-bold text-slate-900 bg-amber-50/40">
+                            {c.bkTongSo ?? '---'}
+                          </td>
+
+                          {/* Tỷ trọng cơ cấu (%) */}
+                          <td className="p-2 border border-slate-300 text-center text-slate-600">{c.ttNongLamThuySan !== undefined ? `${c.ttNongLamThuySan}%` : '---'}</td>
+                          <td className="p-2 border border-slate-300 text-center text-slate-600">{c.ttCongNghiepXayDung !== undefined ? `${c.ttCongNghiepXayDung}%` : '---'}</td>
+                          <td className="p-2 border border-slate-300 text-center text-slate-600">{c.ttThuongMaiDichVu !== undefined ? `${c.ttThuongMaiDichVu}%` : '---'}</td>
+                          <td className="p-2 border border-slate-300 text-center text-slate-600">{c.ttThuKhacLuong !== undefined ? `${c.ttThuKhacLuong}%` : '---'}</td>
+
+                          {/* Mẫu chính thức */}
+                          <td className="p-2 border border-slate-300 text-center font-medium text-emerald-800">{c.mauNongLamThuySan ?? '---'}</td>
+                          <td className="p-2 border border-slate-300 text-center font-medium text-emerald-800">{c.mauCongNghiepXayDung ?? '---'}</td>
+                          <td className="p-2 border border-slate-300 text-center font-medium text-emerald-800">{c.mauThuongMaiDichVu ?? '---'}</td>
+                          <td className="p-2 border border-slate-300 text-center font-medium text-emerald-800">{c.mauThuKhacLuong ?? '---'}</td>
+                          <td className="p-2 border border-slate-300 text-center font-black text-emerald-950 bg-emerald-50/60">
+                            {c.mauTongSo ?? '---'}
+                          </td>
+
+                          {/* Mẫu dự phòng */}
+                          <td className="p-2 border border-slate-300 text-center font-semibold text-amber-800 bg-amber-50/30">
+                            {c.mauDuPhong ?? '---'}
+                          </td>
+
+                          {/* Kết quả điều tra thực tế & Liên kết TNH */}
+                          <td className="p-2 border border-slate-300 text-center font-bold">
+                            {item.totalHH > 0 ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-100 text-emerald-900 border border-emerald-300 rounded font-bold text-[11px]">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-700" />
+                                <span>{item.totalHH} hộ</span>
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 text-[11px] italic">Chưa nạp</span>
+                            )}
+                          </td>
+                          <td className="p-2 border border-slate-300 text-right font-black text-emerald-900 bg-emerald-50/40">
+                            {item.perCapitaMonth > 0 ? `${item.perCapitaMonth.toLocaleString()} đ` : '---'}
+                          </td>
+                          <td className="p-2 border border-slate-300 text-center" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex items-center justify-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTnhScopeMode('COMMUNE_SECTOR');
+                                  setTnhSelectedCommuneId(c.id);
+                                  setTnhSelectedTkcs(c.tkcsCode || 'ALL');
+                                  setSelectedCommuneId(c.id);
+                                  showNotification('success', `Đã liên kết số liệu Tổng hợp nhanh cho xã [${c.communeCode}] ${c.communeName}`);
+                                }}
+                                className={`px-2 py-1 rounded text-[11px] font-bold cursor-pointer transition-all shadow-2xs ${
+                                  isCommuneSelected 
+                                    ? 'bg-sky-800 text-white ring-2 ring-sky-400' 
+                                    : 'bg-sky-700 hover:bg-sky-600 text-white'
+                                }`}
+                                title="Xem Tổng hợp nhanh cho riêng xã này ở bảng dưới"
+                              >
+                                {isCommuneSelected ? '✓ Đang xem Xã' : 'Xem Xã'}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTnhScopeMode('TKCS_SECTOR');
+                                  setTnhSelectedTkcs(c.tkcsCode || 'ALL');
+                                  setTnhSelectedCommuneId('ALL');
+                                  setSelectedTkcs(c.tkcsCode || 'ALL');
+                                  showNotification('success', `Đã liên kết số liệu Tổng hợp nhanh cho TKCS [${c.tkcsCode}] ${c.tkcsName || ''}`);
+                                }}
+                                className={`px-1.5 py-1 rounded text-[11px] font-bold cursor-pointer transition-all border ${
+                                  isTkcsSelected
+                                    ? 'bg-amber-600 text-white border-amber-700 ring-2 ring-amber-300'
+                                    : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                                }`}
+                                title="Xem Tổng hợp nhanh cho TKCS này ở bảng dưới"
+                              >
+                                {isTkcsSelected ? '✓ Xem TKCS' : 'Xem TKCS'}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {filteredCommunesTnhOverview.length === 0 && (
+                      <tr>
+                        <td colSpan={23} className="p-6 text-center text-slate-400 italic">
+                          Không tìm thấy đơn vị xã nào phù hợp với bộ lọc tìm kiếm.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 
-            {/* Top Summary Table matching Image layout */}
-            <div className="overflow-x-auto border border-slate-300 rounded shadow-2xs bg-white">
-              <table className="w-full border-collapse text-xs text-slate-800">
-                <thead>
-                  <tr className="bg-sky-900 text-white text-center font-semibold">
-                    <th className="border border-sky-950 p-2 w-12">STT</th>
-                    <th className="border border-sky-950 p-2 w-16">Mã loại</th>
-                    <th className="border border-sky-950 p-2 text-left">Tên nhóm ngành nguồn thu lớn nhất</th>
-                    <th className="border border-sky-950 p-2 w-28">Tổng số hộ trong xã</th>
-                    <th className="border border-sky-950 p-2 w-24">Tỷ trọng cơ cấu (%)</th>
-                    <th className="border border-sky-950 p-2 w-28">Chỉ tiêu phân bổ mẫu chính thức</th>
-                    <th className="border border-sky-950 p-2 w-32">Suy rộng TNBQ xã / năm (=E*K)</th>
-                    <th className="border border-sky-950 p-2 w-36">Thu nhập bình quân đầu người/tháng (Nghìn đồng)</th>
-                    <th className="border border-sky-950 p-2 w-24">Tốc độ so 2025 (%)</th>
-                    <th className="border border-sky-950 p-2 w-36">TNBQ đầu người/tháng theo loại hộ (=G/F/12)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {tnhSummary.sectorData.map((s, idx) => (
-                    <tr key={s.code} className="hover:bg-sky-50/80 transition-colors">
-                      <td className="border border-slate-300 p-2 text-center font-medium bg-slate-50">{idx + 1}</td>
-                      <td className="border border-slate-300 p-2 text-center font-bold text-sky-800">{s.code}</td>
-                      <td className="border border-slate-300 p-2 font-bold text-slate-800">{s.name}</td>
-                      <td className="border border-slate-300 p-2 text-center font-bold">{s.count}</td>
-                      <td className="border border-slate-300 p-2 text-center font-bold text-amber-900 bg-amber-50/30">{s.percent}%</td>
-                      <td className="border border-slate-300 p-2 text-center font-medium">{s.allocationTarget}</td>
-                      <td className="border border-slate-300 p-2 text-right font-bold text-sky-900 bg-sky-50/40">{s.extrapolatedIncomeYear.toLocaleString()}</td>
-                      <td className="border border-slate-300 p-2 text-right bg-emerald-50/30 text-emerald-900 font-extrabold">{tnhSummary.overallPerCapitaMonth.toLocaleString()}</td>
-                      <td className="border border-slate-300 p-2 text-center font-medium">{s.growthRate}%</td>
-                      <td className="border border-slate-300 p-2 text-right font-extrabold text-emerald-800 bg-emerald-100/50">{s.perCapitaMonth.toLocaleString()}</td>
+            {/* BẢNG 2: TỔNG HỢP NHANH SỐ LIỆU ĐƯỢC LINK TRỰC TIẾP TỪ BẢNG TRÊN */}
+            <div className="bg-white border-2 border-[#058da0] rounded-lg shadow-md overflow-hidden flex flex-col">
+              {/* Header của Bảng Tổng hợp nhanh */}
+              <div className="bg-[#058da0] text-white px-4 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-[#047484]">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 bg-amber-400 text-slate-950 rounded font-black text-xs">
+                    BẢNG 2
+                  </div>
+                  <div>
+                    <h3 className="font-extrabold text-sm md:text-base uppercase tracking-wide flex items-center gap-2">
+                      <span>Bảng Tổng Hợp Nhanh Thu Nhập Bình Quân Đầu Người (Phụ lục II)</span>
+                    </h3>
+                    <p className="text-xs text-amber-300 font-bold mt-0.5 flex items-center gap-1.5">
+                      <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                      <span>
+                        {tnhScopeMode === 'COMMUNE_SECTOR' || tnhScopeMode === 'COMMUNE_QUICK' ? (
+                          tnhSelectedCommuneId !== 'ALL' ? (
+                            (() => {
+                              const c = communes.find(item => item.id === tnhSelectedCommuneId || item.communeCode === tnhSelectedCommuneId);
+                              return `📍 Đang liên kết đơn vị XÃ: [${c?.communeCode || '---'}] ${c?.communeName || '---'} (Thuộc TKCS: [${c?.tkcsCode || '---'}] ${c?.tkcsName || ''})`;
+                            })()
+                          ) : (
+                            '📍 Đang liên kết: Toàn bộ 104 Xã / Phường'
+                          )
+                        ) : tnhScopeMode === 'TKCS_SECTOR' ? (
+                          tnhSelectedTkcs !== 'ALL' ? (
+                            (() => {
+                              const matchingCommunes = communes.filter(c => c.tkcsCode === tnhSelectedTkcs);
+                              const tkName = matchingCommunes[0]?.tkcsName || 'Thống kê cơ sở';
+                              const cNames = matchingCommunes.map(c => c.communeName).join(', ');
+                              return `📍 Đang liên kết THỐNG KÊ CƠ SỞ: [${tnhSelectedTkcs}] ${tkName} (Gồm ${matchingCommunes.length} xã: ${cNames})`;
+                            })()
+                          ) : (
+                            '📍 Đang liên kết: Toàn bộ Thống kê cơ sở'
+                          )
+                        ) : (
+                          '📍 Đang liên kết: Toàn Tỉnh (104 Xã / Phường)'
+                        )}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="bg-black/20 px-3 py-1.5 rounded border border-white/20 text-xs font-bold text-white">
+                    Phạm vi: <strong className="text-amber-300">{tnhScopeCommunes.length} xã</strong> | Bảng kê: <strong className="text-amber-300">{tnhSummary.totalBkHH} hộ</strong> | Mẫu: <strong className="text-emerald-300">{tnhSummary.totalAllocMau} hộ</strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* Table Body */}
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-xs text-slate-800 whitespace-nowrap">
+                  <thead>
+                    <tr className="bg-[#058da0] text-white text-center font-bold text-[11px]">
+                      <th className="border border-[#047484] p-2.5 w-12 bg-[#058da0]">STT</th>
+                      <th className="border border-[#047484] p-2.5 w-16 bg-[#058da0]">Mã loại</th>
+                      <th className="border border-[#047484] p-2.5 text-left min-w-[200px] bg-[#058da0]">Tên nhóm ngành nguồn thu lớn nhất</th>
+                      <th className="border border-[#047484] p-2.5 w-32 bg-[#047484] text-amber-200">
+                        Tổng số hộ trong bảng kê (Cột D)
+                      </th>
+                      <th className="border border-[#047484] p-2.5 w-28 bg-[#047484] text-cyan-100">
+                        Tỷ trọng cơ cấu (%) (Cột E)
+                      </th>
+                      <th className="border border-[#047484] p-2.5 w-32 bg-[#047484] text-emerald-200">
+                        Chỉ tiêu phân bổ mẫu chính thức (Cột F)
+                      </th>
+                      <th className="border border-[#047484] p-2.5 w-28 bg-[#058da0] text-white">
+                        Hộ điều tra thực tế
+                      </th>
+                      <th className="border border-[#047484] p-2.5 w-40 bg-[#035b69] text-emerald-100">
+                        TNBQ đầu người/tháng theo loại hộ (Cột K = G/F/12) (1.000 đ)
+                      </th>
+                      <th className="border border-[#047484] p-2.5 w-44 bg-[#02444e] text-amber-300 font-black">
+                        Suy rộng TNBQ (= Tỷ trọng cơ cấu * TNBQ theo loại hộ) (1.000 đ)
+                      </th>
                     </tr>
-                  ))}
-                  <tr className="bg-sky-100 font-black text-slate-900">
-                    <td className="border border-slate-300 p-2.5 text-center" colSpan={3}>TỔNG TOÀN XÃ / PHẠM VI BÁO CÁO</td>
-                    <td className="border border-slate-300 p-2.5 text-center text-sky-900 text-sm">{tnhSummary.totalHH}</td>
-                    <td className="border border-slate-300 p-2.5 text-center text-amber-900">100%</td>
-                    <td className="border border-slate-300 p-2.5 text-center">{tnhSummary.totalHH}</td>
-                    <td className="border border-slate-300 p-2.5 text-right text-sky-900 text-sm">{tnhSummary.overallExtrapolated.toLocaleString()}</td>
-                    <td className="border border-slate-300 p-2.5 text-right text-emerald-950 text-sm">{tnhSummary.overallPerCapitaMonth.toLocaleString()}</td>
-                    <td className="border border-slate-300 p-2.5 text-center">100%</td>
-                    <td className="border border-slate-300 p-2.5 text-right text-emerald-950 text-sm">{tnhSummary.overallPerCapitaMonth.toLocaleString()}</td>
-                  </tr>
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {tnhSummary.sectorData.map((s, idx) => (
+                      <tr key={s.code} className="hover:bg-sky-50 transition-colors">
+                        <td className="border border-slate-300 p-2.5 text-center font-medium bg-slate-50">{idx + 1}</td>
+                        <td className="border border-slate-300 p-2.5 text-center font-bold text-sky-800 bg-sky-50/50">{s.code}</td>
+                        <td className="border border-slate-300 p-2.5 font-bold text-slate-800">{s.name}</td>
+                        
+                        {/* 1. Tổng số hộ */}
+                        <td className="border border-slate-300 p-2.5 text-center font-extrabold text-slate-900 bg-amber-50/30">
+                          {s.bkCount.toLocaleString()}
+                        </td>
+
+                        {/* 2. Tỷ trọng cơ cấu */}
+                        <td className="border border-slate-300 p-2.5 text-center font-extrabold text-cyan-900 bg-cyan-50/30">
+                          {s.percent}%
+                        </td>
+
+                        {/* 3. Mẫu chính thức phân bổ */}
+                        <td className="border border-slate-300 p-2.5 text-center font-extrabold text-emerald-900 bg-emerald-50/30">
+                          {s.mauAlloc}
+                        </td>
+
+                        {/* Số hộ điều tra thực tế */}
+                        <td className="border border-slate-300 p-2.5 text-center font-bold">
+                          {s.surveyCount > 0 ? (
+                            <span className="inline-block px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded font-bold border border-emerald-300">
+                              {s.surveyCount} hộ ({s.groupMembers} ng)
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 italic">Chưa nạp</span>
+                          )}
+                        </td>
+
+                        {/* TNBQ đầu người/tháng theo loại hộ */}
+                        <td className="border border-slate-300 p-2.5 text-right font-extrabold text-emerald-900 bg-emerald-50/50">
+                          {s.perCapitaMonth > 0 ? `${s.perCapitaMonth.toLocaleString()} đ` : '0 đ'}
+                        </td>
+
+                        {/* 4. Suy rộng TNBQ = Tỉ trọng cơ cấu * TNBQ đầu người/tháng theo loại hộ */}
+                        <td className="border border-slate-300 p-2.5 text-right font-black text-sky-950 bg-amber-100/40 text-sm">
+                          {s.extrapolatedIncomeYear > 0 ? `${s.extrapolatedIncomeYear.toLocaleString()} đ` : '0 đ'}
+                        </td>
+                      </tr>
+                    ))}
+
+                    {/* Dòng TỔNG TOÀN XÃ / TOÀN TKCS */}
+                    <tr className="bg-sky-100 font-black text-slate-900 border-t-2 border-sky-800">
+                      <td className="border border-slate-300 p-3 text-center" colSpan={3}>
+                        <div className="flex items-center justify-between">
+                          <span className="uppercase text-sky-950">TỔNG TOÀN BỘ PHẠM VI ĐANG XEM</span>
+                          <span className="text-xs bg-sky-800 text-white px-2 py-0.5 rounded font-bold">
+                            {tnhScopeCommunes.length} Xã
+                          </span>
+                        </div>
+                      </td>
+                      <td className="border border-slate-300 p-3 text-center text-slate-950 text-sm font-black bg-amber-100/60">
+                        {tnhSummary.totalBkHH.toLocaleString()}
+                      </td>
+                      <td className="border border-slate-300 p-3 text-center text-cyan-950 font-black bg-cyan-100/60">
+                        100.0%
+                      </td>
+                      <td className="border border-slate-300 p-3 text-center text-emerald-950 text-sm font-black bg-emerald-100/60">
+                        {tnhSummary.totalAllocMau.toLocaleString()}
+                      </td>
+                      <td className="border border-slate-300 p-3 text-center text-slate-900 font-black">
+                        {tnhSummary.totalHH} hộ ({tnhSummary.totalMembers} ng)
+                      </td>
+                      <td className="border border-slate-300 p-3 text-right text-emerald-950 font-black bg-emerald-100/40">
+                        {tnhSummary.overallDirectPerCapita.toLocaleString()} đ
+                      </td>
+                      <td className="border border-slate-300 p-3 text-right text-rose-950 text-base font-black bg-amber-200/80 shadow-inner">
+                        {tnhSummary.overallExtrapolated.toLocaleString()} đ
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {/* Formula Legend Box matching drawing notes */}
             <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-xs text-amber-950 flex flex-col gap-1.5 shadow-2xs">
               <p className="font-bold text-amber-900 flex items-center gap-1.5 text-xs">
                 <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>Ghi chú công thức tính tự động khớp hình vẽ hướng dẫn:</span>
+                <span>Quy tắc tính toán tự động chuẩn hóa:</span>
               </p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-0.5">
-                <div className="bg-white p-2 rounded border border-amber-200">
+                <div className="bg-white p-2.5 rounded border border-amber-200">
                   <span className="font-bold text-amber-900 block mb-0.5">1. TNBQ đầu người/tháng theo loại hộ (Cột K):</span>
                   <code className="text-[11px] font-bold text-emerald-900 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 block">
-                    = Tổng TN nhóm (G12) / Tổng số thành viên nhóm (F12) / 12
+                    = Tổng thu nhập nhóm / Tổng số nhân khẩu nhóm / 12
                   </code>
                 </div>
-                <div className="bg-white p-2 rounded border border-amber-200">
-                  <span className="font-bold text-amber-900 block mb-0.5">2. Suy rộng TNBQ xã / năm (Cột G):</span>
+                <div className="bg-white p-2.5 rounded border border-amber-200">
+                  <span className="font-bold text-amber-900 block mb-0.5">2. Suy rộng TNBQ theo loại hộ:</span>
                   <code className="text-[11px] font-bold text-sky-900 bg-sky-50 px-1.5 py-0.5 rounded border border-sky-200 block">
-                    = Tỷ trọng cơ cấu (%) (E) * TNBQ theo loại hộ (K)
+                    = Tỉ trọng cơ cấu (%) * TNBQ theo loại hộ
                   </code>
                 </div>
-                <div className="bg-white p-2 rounded border border-amber-200">
-                  <span className="font-bold text-amber-900 block mb-0.5">3. Thu nhập BQ đầu người/tháng toàn xã (Cột H):</span>
+                <div className="bg-white p-2.5 rounded border border-amber-200">
+                  <span className="font-bold text-amber-900 block mb-0.5">3. TNBQ bình quân toàn xã / TKCS:</span>
                   <code className="text-[11px] font-bold text-purple-900 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 block">
-                    = Tổng các giá trị suy rộng nhóm (G)
+                    = Tổng Suy rộng của 4 loại hộ
                   </code>
                 </div>
               </div>
@@ -2947,7 +4657,9 @@ export default function App() {
                     <div key={grp.code} className="border border-slate-300 rounded overflow-hidden shadow-2xs">
                       {/* Yellow Group Header Row matching Image */}
                       <div className="bg-amber-300 text-slate-900 p-2.5 font-bold text-xs flex flex-wrap items-center justify-between border-b border-amber-400 gap-2">
-                        <span className="text-sm font-black text-amber-950 uppercase">{grp.label} ({sData.count} hộ)</span>
+                        <span className="text-sm font-black text-amber-950 uppercase">
+                          {grp.label} (Bảng kê: {sData.bkCount} hộ | Mẫu: {sData.mauAlloc} hộ | Đã điều tra: {sData.surveyCount} hộ)
+                        </span>
                         <div className="flex flex-wrap items-center gap-3 text-amber-950">
                           <span>Tổng số thành viên của hộ: <strong className="text-rose-950 font-black">{sData.groupMembers} người</strong></span>
                           <span>|</span>
@@ -3022,80 +4734,186 @@ export default function App() {
                   <span>Quản lý danh mục Xã, Địa bàn & Dữ liệu lưu trữ</span>
                 </h2>
                 <p className="text-xs text-slate-600 mt-0.5">
-                  Quản lý các đơn vị xã, địa bàn và xóa dữ liệu khi cần tải lại file Excel mới.
+                  Quản lý các đơn vị xã, địa bàn và xóa dữ liệu khi cần tải lại file Excel mới. Dữ liệu được đồng bộ trực tiếp lên Firebase Firestore.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsHeaderConfigModalOpen(true)}
+                  className="px-3.5 py-2 bg-sky-700 hover:bg-sky-600 active:bg-sky-800 text-white rounded text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                  title="Tải file Excel lên với cấu hình tiêu đề dòng và cột"
+                >
+                  <Upload className="w-4 h-4" />
+                  <span>Tải file lên (Cấu hình dòng & cột)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNewCommuneForm({
+                      communeCode: String(communes.length + 1).padStart(2, '0'),
+                      communeName: '',
+                      tkcsCode: 'TKCS-01',
+                      tkcsName: 'Tổ thống kê cơ sở'
+                    });
+                    setIsAddCommuneModalOpen(true);
+                  }}
+                  className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-800 text-white rounded text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                  title="Thêm mới một xã vào danh mục"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Thêm xã mới</span>
+                </button>
+
                 <button 
                   onClick={() => setIsClearAllModalOpen(true)}
-                  className="px-4 py-2 bg-rose-700 hover:bg-rose-600 text-white rounded text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                  className="px-3.5 py-2 bg-rose-700 hover:bg-rose-600 text-white rounded text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
                   title="Xóa toàn bộ hộ, địa bàn và xã để tải lại file Excel mới từ đầu"
                 >
                   <Trash2 className="w-4 h-4" />
-                  <span>Xóa toàn bộ dữ liệu để up lại từ đầu</span>
+                  <span>Xóa toàn bộ dữ liệu</span>
                 </button>
               </div>
             </div>
 
-            {/* Quick Helper Banner */}
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3.5 flex items-start gap-3 text-xs text-amber-950">
-              <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-              <div className="flex-1">
-                <p className="font-bold text-amber-900">Bạn muốn xóa dữ liệu cũ để nạp lại file Excel?</p>
-                <p className="mt-0.5 text-amber-800">
-                  - Bấm nút <strong>"Xóa toàn bộ dữ liệu để up lại từ đầu"</strong> ở góc trên để dọn sạch toàn bộ dữ liệu hộ, địa bàn và xã trên Firebase và bộ nhớ máy.<br />
-                  - Hoặc bạn có thể bấm nút <strong>Xóa</strong> tại từng Xã hoặc từng Địa bàn trong bảng dưới đây để xóa riêng lẻ.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Communes Table */}
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-slate-800 text-xs uppercase flex items-center gap-1.5">
-                    <Building2 className="w-4 h-4 text-sky-700" />
-                    <span>Danh sách xã trên hệ thống ({communes.length} xã)</span>
-                  </h3>
+            {/* Cảnh báo xã trùng lặp trong Tab 4 */}
+            {duplicateCommunesDetected.length > 0 && (
+              <div className="bg-amber-50 border-2 border-amber-400 rounded-lg p-3 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-sm">
+                <div className="flex items-start gap-2.5">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-extrabold text-amber-950 text-xs uppercase">
+                      Cảnh báo: Phát hiện {duplicateCommunesDetected.length} xã có Mã xã trùng nhau trên hệ thống!
+                    </h4>
+                    <p className="text-xs text-amber-900 mt-0.5">
+                      Các xã trùng: {duplicateCommunesDetected.map(c => `[${c.communeCode}] ${c.communeName}`).join(', ')}.
+                    </p>
+                  </div>
                 </div>
-                <div className="overflow-x-auto border border-slate-300 rounded shadow-2xs">
+                <button
+                  type="button"
+                  onClick={handleDeduplicateCommunes}
+                  disabled={isDeleting}
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-xs shrink-0 transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isDeleting ? 'animate-spin' : ''}`} />
+                  <span>Hợp nhất mã xã trùng</span>
+                </button>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              {/* Communes Table */}
+              <div className="flex flex-col gap-2">
+                <div className="bg-[#058da0] text-white px-3.5 py-2 rounded-t flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="w-4 h-4 text-cyan-200" />
+                    <span className="font-extrabold text-white text-xs uppercase tracking-wide">
+                      Danh sách xã trên hệ thống ({communes.length} xã)
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-cyan-100 font-medium">
+                    Liên kết trực tiếp TNH & Bảng kê
+                  </span>
+                </div>
+                <div className="overflow-x-auto border border-slate-300 rounded-b shadow-2xs max-h-[500px] overflow-y-auto">
                   <table className="w-full border-collapse text-xs text-slate-800">
-                    <thead>
-                      <tr className="bg-sky-700 text-white text-center font-bold">
-                        <th className="border border-sky-800 p-2">Mã xã</th>
-                        <th className="border border-sky-800 p-2 text-left">Tên xã</th>
-                        <th className="border border-sky-800 p-2">TKCS</th>
-                        <th className="border border-sky-800 p-2 text-center">Số hộ</th>
-                        <th className="border border-sky-800 p-2 text-center w-24">Thao tác</th>
+                    <thead className="sticky top-0 z-10 bg-[#058da0]">
+                      <tr className="bg-[#058da0] text-white text-center font-bold">
+                        <th className="border border-[#047484] p-2 w-14">Mã xã</th>
+                        <th className="border border-[#047484] p-2 text-left">Tên xã</th>
+                        <th className="border border-[#047484] p-2 text-left">TKCS</th>
+                        <th className="border border-[#047484] p-2 text-center w-14">Số ĐB</th>
+                        <th className="border border-[#047484] p-2 text-center w-16">Số hộ</th>
+                        <th className="border border-[#047484] p-2 text-right w-24">TNBQ/tháng</th>
+                        <th className="border border-[#047484] p-2 text-center w-36">Thao tác</th>
                       </tr>
                     </thead>
                     <tbody>
                       {communes.map(c => {
-                        const hhCount = households.filter(h => h.communeId === c.id).length;
+                        const overviewItem = communesTnhOverview.find(o => o.commune.id === c.id);
+                        const hhCount = overviewItem ? overviewItem.totalHH : households.filter(h => h.communeId === c.id).length;
+                        const areasCount = overviewItem ? overviewItem.areasCount : areas.filter(a => a.communeId === c.id).length;
+                        const perCapita = overviewItem ? overviewItem.perCapitaMonth : 0;
+                        const isDup = duplicateCommunesDetected.some(dup => dup.id === c.id);
                         return (
-                          <tr key={c.id} className="hover:bg-sky-50 transition-colors">
+                          <tr key={c.id} className={`transition-colors ${isDup ? 'bg-amber-50/80 hover:bg-amber-100/80' : 'hover:bg-sky-50'}`}>
                             <td className="border border-slate-300 p-2 text-center font-bold text-sky-900 bg-sky-50/50">{c.communeCode}</td>
-                            <td className="border border-slate-300 p-2 font-bold text-slate-900">{c.communeName}</td>
-                            <td className="border border-slate-300 p-2 text-center font-medium">{c.tkcsCode}</td>
+                            <td className="border border-slate-300 p-2 font-bold text-slate-900">
+                              <span>{c.communeName}</span>
+                              {isDup && (
+                                <span className="ml-1.5 px-1.5 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded font-black text-[10px]">
+                                  Trùng lặp
+                                </span>
+                              )}
+                            </td>
+                            <td className="border border-slate-300 p-2 text-left font-medium">
+                              <span className="font-bold text-slate-800 block">{c.tkcsName || 'Tổ thống kê'}</span>
+                              <span className="text-[10px] text-slate-500 font-semibold">[{c.tkcsCode}]</span>
+                            </td>
+                            <td className="border border-slate-300 p-2 text-center font-semibold text-slate-700">{areasCount}</td>
                             <td className="border border-slate-300 p-2 text-center font-bold text-emerald-800">{hhCount} hộ</td>
+                            <td className="border border-slate-300 p-2 text-right font-black text-emerald-900 bg-emerald-50/20">
+                              {perCapita > 0 ? `${perCapita.toLocaleString()} đ` : '---'}
+                            </td>
                             <td className="border border-slate-300 p-2 text-center">
-                              <button
-                                type="button"
-                                onClick={() => setCommuneToDelete(c)}
-                                className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-900 rounded border border-rose-200 font-bold text-[11px] flex items-center gap-1 mx-auto cursor-pointer transition-colors"
-                                title={`Xóa xã ${c.communeName} và toàn bộ hộ thuộc xã`}
-                              >
-                                <Trash2 className="w-3 h-3" />
-                                <span>Xóa xã</span>
-                              </button>
+                              <div className="flex items-center justify-center gap-1 flex-wrap">
+                                <button
+                                  type="button"
+                                  onClick={() => handleViewCommuneTNH(c)}
+                                  className="px-2 py-1 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 rounded font-black text-[10px] flex items-center gap-0.5 cursor-pointer transition-colors shadow-2xs"
+                                  title={`Xem Bảng Tổng hợp nhanh số liệu cho xã ${c.communeName}`}
+                                >
+                                  <BarChart3 className="w-3 h-3 text-slate-950" />
+                                  <span>TNH</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleLoadHouseholdsForCommune(c)}
+                                  className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded font-bold text-[10px] flex items-center gap-0.5 cursor-pointer transition-colors shadow-2xs"
+                                  title={`Tải file bảng kê hộ cho xã ${c.communeName}`}
+                                >
+                                  <Upload className="w-3 h-3" />
+                                  <span>Tải hộ</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedCommuneId(c.id);
+                                    setSelectedTkcs(c.tkcsCode || 'ALL');
+                                    setActiveTab('entry');
+                                  }}
+                                  className="px-1.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-800 rounded border border-sky-200 font-bold text-[10px] cursor-pointer"
+                                  title={`Xem các hộ thuộc xã ${c.communeName} ở Tab 2`}
+                                >
+                                  Hộ
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingCommune(c)}
+                                  className="p-1 text-sky-700 hover:bg-sky-100 rounded cursor-pointer"
+                                  title={`Sửa thông tin xã ${c.communeName}`}
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setCommuneToDelete(c)}
+                                  className="p-1 text-rose-700 hover:bg-rose-100 rounded cursor-pointer"
+                                  title={`Xóa xã ${c.communeName}`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
                       })}
                       {communes.length === 0 && (
                         <tr>
-                          <td colSpan={5} className="p-6 text-center text-slate-400 italic">
-                            Chưa có xã nào. Hãy sang Tab 1 để tải file Excel bảng kê.
+                          <td colSpan={7} className="p-6 text-center text-slate-400 italic">
+                            Chưa có xã nào. Hãy bấm "Tải file lên (Cấu hình dòng & cột)" hoặc sang Tab 1 để tải file Excel.
                           </td>
                         </tr>
                       )}
@@ -3105,21 +4923,23 @@ export default function App() {
               </div>
 
               {/* Areas Table */}
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-slate-800 text-xs uppercase flex items-center gap-1.5">
-                    <Layers className="w-4 h-4 text-emerald-700" />
-                    <span>Danh sách địa bàn điều tra ({areas.length} địa bàn)</span>
-                  </h3>
+              <div className="flex flex-col gap-2">
+                <div className="bg-[#058da0] text-white px-3.5 py-2 rounded-t flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-cyan-200" />
+                    <span className="font-extrabold text-white text-xs uppercase tracking-wide">
+                      Danh sách địa bàn điều tra ({areas.length} địa bàn)
+                    </span>
+                  </div>
                 </div>
-                <div className="overflow-x-auto border border-slate-300 rounded max-h-80 overflow-y-auto shadow-2xs">
+                <div className="overflow-x-auto border border-slate-300 rounded-b max-h-[500px] overflow-y-auto shadow-2xs">
                   <table className="w-full border-collapse text-xs text-slate-800">
-                    <thead>
-                      <tr className="bg-sky-700 text-white text-center font-bold sticky top-0">
-                        <th className="border border-sky-800 p-2 w-16">Mã ĐB</th>
-                        <th className="border border-sky-800 p-2 text-left">Tên địa bàn (Sheet)</th>
-                        <th className="border border-sky-800 p-2 w-20">Số hộ</th>
-                        <th className="border border-sky-800 p-2 text-center w-24">Thao tác</th>
+                    <thead className="sticky top-0 z-10 bg-[#058da0]">
+                      <tr className="bg-[#058da0] text-white text-center font-bold">
+                        <th className="border border-[#047484] p-2 w-16">Mã ĐB</th>
+                        <th className="border border-[#047484] p-2 text-left">Tên địa bàn (Sheet)</th>
+                        <th className="border border-[#047484] p-2 w-20">Số hộ</th>
+                        <th className="border border-[#047484] p-2 text-center w-24">Thao tác</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -3295,11 +5115,11 @@ export default function App() {
                   <div className="overflow-x-auto border border-slate-300 rounded">
                     <table className="w-full border-collapse text-xs">
                       <thead>
-                        <tr className="bg-sky-800 text-white text-center font-bold">
-                          <th className="p-2 border border-sky-900 w-16">Mã tra cứu</th>
-                          <th className="p-2 border border-sky-900 text-left min-w-[200px]">Tên sản phẩm / Nguồn thu / Ngành nghề</th>
-                          <th className="p-2 border border-sky-900 text-left min-w-[200px]">Nhóm phân loại Phụ lục II</th>
-                          <th className="p-2 border border-sky-900 w-28 text-center">Sao chép</th>
+                        <tr className="bg-[#058da0] text-white text-center font-bold">
+                          <th className="p-2 border border-[#047484] w-16">Mã tra cứu</th>
+                          <th className="p-2 border border-[#047484] text-left min-w-[200px]">Tên sản phẩm / Nguồn thu / Ngành nghề</th>
+                          <th className="p-2 border border-[#047484] text-left min-w-[200px]">Nhóm phân loại Phụ lục II</th>
+                          <th className="p-2 border border-[#047484] w-28 text-center">Sao chép</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -3482,6 +5302,287 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CẤU HÌNH TIÊU ĐỀ DÒNG VÀ CỘT NẠP DỮ LIỆU EXCEL */}
+      <ExcelHeaderConfigModal
+        isOpen={isHeaderConfigModalOpen}
+        onClose={() => setIsHeaderConfigModalOpen(false)}
+        existingCommunes={communes}
+        onFinalizeHouseholdImport={executeFinalizeImport}
+        onFinalizeCommuneListImport={handleFinalizeCommuneListImport}
+        defaultCommuneCode={formCommuneCode}
+        defaultCommuneName={formCommuneName}
+        defaultTkcsCode={formTkcsCode}
+        defaultTkcsName={formTkcsName}
+        initialImportMode={headerConfigInitialMode}
+      />
+
+      {/* MODAL SỬA THÔNG TIN XÃ TRONG DANH MỤC */}
+      {editingCommune && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-xl border border-sky-300 shadow-2xl max-w-md w-full overflow-hidden text-xs">
+            <div className="bg-sky-800 text-white p-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-sky-200" />
+                <h3 className="font-extrabold text-sm uppercase">Sửa thông tin Xã trong Danh mục</h3>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setEditingCommune(null)}
+                className="text-white hover:bg-sky-700 p-1 rounded cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditedCommune} className="p-5 flex flex-col gap-3.5">
+              <div>
+                <label className="block font-bold text-slate-800 mb-1">Mã Xã <span className="text-rose-600">*</span></label>
+                <input
+                  type="text"
+                  required
+                  value={editingCommune.communeCode}
+                  onChange={e => setEditingCommune({ ...editingCommune, communeCode: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-slate-900 font-bold focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-600"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-800 mb-1">Tên Xã <span className="text-rose-600">*</span></label>
+                <input
+                  type="text"
+                  required
+                  value={editingCommune.communeName}
+                  onChange={e => setEditingCommune({ ...editingCommune, communeName: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-slate-900 font-bold focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-600"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-800 mb-1">Mã TKCS</label>
+                <input
+                  type="text"
+                  value={editingCommune.tkcsCode}
+                  onChange={e => setEditingCommune({ ...editingCommune, tkcsCode: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-600"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-800 mb-1">Tên TKCS</label>
+                <input
+                  type="text"
+                  value={editingCommune.tkcsName}
+                  onChange={e => setEditingCommune({ ...editingCommune, tkcsName: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-600"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 mt-1">
+                <button
+                  type="button"
+                  onClick={() => setEditingCommune(null)}
+                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded font-bold cursor-pointer"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-sky-800 hover:bg-sky-700 text-white rounded font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>Lưu thay đổi & Đồng bộ Firebase</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL THÊM XÃ THỦ CÔNG VÀO DANH MỤC */}
+      {isAddCommuneModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-xl border border-emerald-300 shadow-2xl max-w-md w-full overflow-hidden text-xs">
+            <div className="bg-emerald-800 text-white p-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-emerald-200" />
+                <h3 className="font-extrabold text-sm uppercase">Thêm Xã mới vào Danh mục</h3>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setIsAddCommuneModalOpen(false)}
+                className="text-white hover:bg-emerald-700 p-1 rounded cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateNewCommuneDirect} className="p-5 flex flex-col gap-3.5">
+              <div>
+                <label className="block font-bold text-slate-800 mb-1">Mã Xã <span className="text-rose-600">*</span></label>
+                <input
+                  type="text"
+                  required
+                  value={newCommuneForm.communeCode}
+                  onChange={e => setNewCommuneForm({ ...newCommuneForm, communeCode: e.target.value })}
+                  placeholder="Ví dụ: 01, 02..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-slate-900 font-bold focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-800 mb-1">Tên Xã <span className="text-rose-600">*</span></label>
+                <input
+                  type="text"
+                  required
+                  value={newCommuneForm.communeName}
+                  onChange={e => setNewCommuneForm({ ...newCommuneForm, communeName: e.target.value })}
+                  placeholder="Nhập tên xã/phường..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-slate-900 font-bold focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-800 mb-1">Mã TKCS</label>
+                <input
+                  type="text"
+                  value={newCommuneForm.tkcsCode}
+                  onChange={e => setNewCommuneForm({ ...newCommuneForm, tkcsCode: e.target.value })}
+                  placeholder="TKCS-01..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-800 mb-1">Tên TKCS</label>
+                <input
+                  type="text"
+                  value={newCommuneForm.tkcsName}
+                  onChange={e => setNewCommuneForm({ ...newCommuneForm, tkcsName: e.target.value })}
+                  placeholder="Tên tổ thống kê cơ sở..."
+                  className="w-full bg-slate-50 border border-slate-300 rounded p-2 text-slate-800 font-medium focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-600"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 mt-1">
+                <button
+                  type="button"
+                  onClick={() => setIsAddCommuneModalOpen(false)}
+                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded font-bold cursor-pointer"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Thêm xã & Lưu cố định Firebase</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CẢNH BÁO TRÙNG MÃ XÃ VÀ XÁC NHẬN GHI ĐÈ DỮ LIỆU */}
+      {pendingDuplicateCommune && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-lg border border-amber-400 shadow-2xl max-w-lg w-full overflow-hidden text-xs">
+            {/* Header */}
+            <div className="bg-amber-600 text-white p-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-200" />
+                <h3 className="font-extrabold text-sm uppercase tracking-wide">
+                  Cảnh báo trùng mã xã
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={handleCancelDuplicateCommune}
+                className="text-white hover:bg-amber-700 p-1 rounded cursor-pointer transition-colors"
+                title="Đóng"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 flex flex-col gap-4 text-slate-700">
+              <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-amber-950 font-medium">
+                <p className="font-bold text-amber-900 flex items-center gap-1.5 text-xs">
+                  <ShieldAlert className="w-4 h-4 text-amber-700 shrink-0" />
+                  <span>
+                    Mã Xã [{pendingDuplicateCommune.newCommuneData.communeCode}] của file nạp đã TRÙNG KHỚP với mã của xã "{pendingDuplicateCommune.existingCommune.communeName}" đang có trên hệ thống!
+                  </span>
+                </p>
+                <p className="text-[12px] text-amber-900 mt-2 font-bold">
+                  Bạn có muốn GHI ĐÈ dữ liệu vào xã cũ không?
+                </p>
+                <p className="text-[11px] text-amber-800 mt-1">
+                  - Nếu chọn <strong>"Ghi đè vào xã đó"</strong>: Toàn bộ danh sách hộ và địa bàn cũ của xã này sẽ được xóa và thay thế bằng dữ liệu mới từ file Excel vừa nạp.<br />
+                  - Nếu không muốn ghi đè: Bấm <strong>"Hủy bỏ"</strong> để không nạp file, không làm trùng lặp xã.
+                </p>
+              </div>
+
+              {/* Comparison table */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                {/* Existing Commune */}
+                <div className="p-3 rounded-lg border border-slate-300 bg-slate-50 flex flex-col gap-1.5">
+                  <span className="font-bold text-slate-800 text-[11px] uppercase flex items-center gap-1">
+                    <Database className="w-3.5 h-3.5 text-slate-600" />
+                    <span>Xã cũ đang lưu ({pendingDuplicateCommune.existingCommune.communeName})</span>
+                  </span>
+                  <div className="mt-1 space-y-1 text-slate-700">
+                    <div>Mã xã: <strong className="text-slate-950 bg-slate-200 px-1 py-0.5 rounded">{pendingDuplicateCommune.existingCommune.communeCode}</strong></div>
+                    <div>Tên xã: <strong className="text-slate-950">{pendingDuplicateCommune.existingCommune.communeName}</strong></div>
+                    <div>TKCS: <span className="font-medium text-slate-700">{pendingDuplicateCommune.existingCommune.tkcsCode} - {pendingDuplicateCommune.existingCommune.tkcsName}</span></div>
+                    <div className="pt-1 border-t border-slate-200 text-slate-600 text-[11px]">
+                      Dữ liệu hiện có: <strong className="text-emerald-700">{households.filter(h => h.communeId === pendingDuplicateCommune.existingCommune.id).length} hộ</strong> ({areas.filter(a => a.communeId === pendingDuplicateCommune.existingCommune.id).length} địa bàn)
+                    </div>
+                  </div>
+                </div>
+
+                {/* New Incoming Commune */}
+                <div className="p-3 rounded-lg border border-sky-300 bg-sky-50 flex flex-col gap-1.5">
+                  <span className="font-bold text-sky-950 text-[11px] uppercase flex items-center gap-1">
+                    <Upload className="w-3.5 h-3.5 text-sky-700" />
+                    <span>Dữ liệu mới từ file Excel</span>
+                  </span>
+                  <div className="mt-1 space-y-1 text-slate-700">
+                    <div>Mã xã: <strong className="text-sky-950 bg-sky-200 px-1 py-0.5 rounded">{pendingDuplicateCommune.newCommuneData.communeCode}</strong></div>
+                    <div>Tên xã: <strong className="text-sky-950">{pendingDuplicateCommune.newCommuneData.communeName}</strong></div>
+                    <div>TKCS: <span className="font-medium text-slate-700">{pendingDuplicateCommune.newCommuneData.tkcsCode} - {pendingDuplicateCommune.newCommuneData.tkcsName}</span></div>
+                    <div className="pt-1 border-t border-sky-200 text-slate-600 text-[11px]">
+                      Dữ liệu file mới: <strong className="text-sky-800">{pendingDuplicateCommune.totalParsed} hộ</strong> ({pendingDuplicateCommune.tempAreas.length} địa bàn)
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200 mt-1">
+                <button
+                  type="button"
+                  onClick={handleCancelDuplicateCommune}
+                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded font-bold cursor-pointer transition-colors"
+                >
+                  Hủy bỏ (Không nạp)
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmOverwriteCommune}
+                  className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded font-extrabold cursor-pointer shadow-xs transition-colors flex items-center justify-center gap-1.5"
+                  title="Xóa dữ liệu cũ của xã này và nạp toàn bộ danh sách hộ mới từ file Excel"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Ghi đè vào xã đó</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

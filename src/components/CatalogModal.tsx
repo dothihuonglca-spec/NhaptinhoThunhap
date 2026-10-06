@@ -55,15 +55,15 @@ export default function CatalogModal({ isOpen, onClose, onSelect, initialTab = '
       <div className="bg-white rounded-lg border border-slate-300 shadow-2xl max-w-5xl w-full flex flex-col max-h-[88vh] overflow-hidden text-xs">
         
         {/* Header */}
-        <div className="bg-sky-800 text-white p-3.5 flex items-center justify-between">
+        <div className="bg-[#058da0] text-white p-3.5 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-sky-300" />
+            <BookOpen className="w-5 h-5 text-cyan-200" />
             <div>
               <span className="font-bold text-sm uppercase block">Sổ tay tra cứu Danh mục Phụ lục II</span>
-              <span className="text-[11px] text-sky-200">Đầy đủ các danh mục chuẩn theo Quy trình điều tra thu nhập hộ</span>
+              <span className="text-[11px] text-cyan-100">Đầy đủ các danh mục chuẩn theo Quy trình điều tra thu nhập hộ</span>
             </div>
           </div>
-          <button onClick={onClose} className="p-1 hover:bg-sky-700 rounded cursor-pointer">
+          <button onClick={onClose} className="p-1 hover:bg-black/20 rounded cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -112,11 +112,11 @@ export default function CatalogModal({ isOpen, onClose, onSelect, initialTab = '
           <div className="border border-slate-300 rounded overflow-hidden bg-white shadow-xs">
             <table className="w-full border-collapse text-xs">
               <thead>
-                <tr className="bg-sky-700 text-white text-center font-bold">
-                  <th className="p-2 border border-sky-800 w-16">Mã tra cứu</th>
-                  <th className="p-2 border border-sky-800 text-left">Tên sản phẩm / Nguồn thu / Ngành nghề</th>
-                  <th className="p-2 border border-sky-800 text-left">Nhóm phân loại theo phụ lục</th>
-                  {onSelect && <th className="p-2 border border-sky-800 w-24">Hành động</th>}
+                <tr className="bg-[#058da0] text-white text-center font-bold">
+                  <th className="p-2 border border-[#047484] w-16">Mã tra cứu</th>
+                  <th className="p-2 border border-[#047484] text-left">Tên sản phẩm / Nguồn thu / Ngành nghề</th>
+                  <th className="p-2 border border-[#047484] text-left">Nhóm phân loại theo phụ lục</th>
+                  {onSelect && <th className="p-2 border border-[#047484] w-24">Hành động</th>}
                 </tr>
               </thead>
               <tbody>

@@ -737,16 +737,16 @@ export default function SurveyorManagement({
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-xs">
                 <thead>
-                  <tr className="bg-sky-800 text-white text-center font-bold">
-                    <th className="border border-sky-900 p-2.5 w-12">STT</th>
-                    <th className="border border-sky-900 p-2.5 w-24">Tên đăng nhập / Mã</th>
-                    <th className="border border-sky-900 p-2.5 text-left min-w-[160px]">Họ và tên cán bộ</th>
-                    <th className="border border-sky-900 p-2.5 text-left w-44">Phòng ban phụ trách</th>
-                    <th className="border border-sky-900 p-2.5 text-left w-36">Vai trò hệ thống</th>
-                    <th className="border border-sky-900 p-2.5 text-left min-w-[200px]">Địa bàn được phân công</th>
-                    <th className="border border-sky-900 p-2.5 text-center w-36">Tiến độ nhập hộ</th>
-                    <th className="border border-sky-900 p-2.5 text-center w-36">Bảo mật / Đổi MK</th>
-                    <th className="border border-sky-900 p-2.5 text-center w-40">Thao tác Admin</th>
+                  <tr className="bg-[#058da0] text-white text-center font-bold">
+                    <th className="border border-[#047484] p-2.5 w-12">STT</th>
+                    <th className="border border-[#047484] p-2.5 w-24">Tên đăng nhập / Mã</th>
+                    <th className="border border-[#047484] p-2.5 text-left min-w-[160px]">Họ và tên cán bộ</th>
+                    <th className="border border-[#047484] p-2.5 text-left w-44">Phòng ban phụ trách</th>
+                    <th className="border border-[#047484] p-2.5 text-left w-36">Vai trò hệ thống</th>
+                    <th className="border border-[#047484] p-2.5 text-left min-w-[200px]">Địa bàn được phân công</th>
+                    <th className="border border-[#047484] p-2.5 text-center w-36">Tiến độ nhập hộ</th>
+                    <th className="border border-[#047484] p-2.5 text-center w-36">Bảo mật / Đổi MK</th>
+                    <th className="border border-[#047484] p-2.5 text-center w-40">Thao tác Admin</th>
                   </tr>
                 </thead>
                 <tbody>
