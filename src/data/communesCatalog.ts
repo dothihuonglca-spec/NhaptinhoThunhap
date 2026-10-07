@@ -9,6 +9,7 @@ export interface CommuneCatalogItem {
   communeName: string;
   tkcsCode: string;
   tkcsName: string;
+  population?: number;
   // Bảng kê trong xã (hộ)
   bkNongLamThuySan: number;
   bkCongNghiepXayDung: number;
@@ -38,13 +39,126 @@ export interface CommuneCatalogItem {
   };
 }
 
+export const COMMUNE_POPULATION_MAP: Record<string, number> = {
+  '11953': 65136, // Phường Phố Hiến
+  '11983': 30571, // Phường Sơn Nam
+  '11980': 18587, // Phường Hồng Châu
+  '12103': 51935, // Phường Mỹ Hào
+  '12133': 37957, // Phường Đường Hào
+  '12127': 38520, // Phường Thượng Hồng
+  '11977': 23874, // Xã Tân Hưng
+  '12337': 42214, // Xã Hoàng Hoa Thám
+  '12364': 23457, // Xã Tiên Lữ
+  '12361': 22337, // Xã Tiên Hoa
+  '12391': 24882, // Xã Quang Hưng
+  '12406': 18240, // Xã Đoàn Đào
+  '12424': 23917, // Xã Tiên Tiến
+  '12427': 16402, // Xã Tống Trân
+  '12280': 36720, // Xã Lương Bằng
+  '12286': 30643, // Xã Nghĩa Dân
+  '12322': 28324, // Xã Hiệp Cường
+  '12313': 27017, // Xã Đức Hợp
+  '12142': 28208, // Xã Ân Thi
+  '12166': 24042, // Xã Xuân Trúc
+  '12148': 32620, // Xã Phạm Ngũ Lão
+  '12184': 28104, // Xã Nguyễn Trãi
+  '12196': 26964, // Xã Hồng Quang
+  '12205': 43013, // Xã Khoái Châu
+  '12223': 38220, // Xã Triệu Việt Vương
+  '12238': 31592, // Xã Việt Tiến
+  '12271': 31049, // Xã Chí Minh
+  '12247': 32819, // Xã Châu Ninh
+  '12073': 65328, // Xã Yên Mỹ
+  '12091': 41023, // Xã Việt Yên
+  '12070': 30882, // Xã Hoàn Long
+  '12064': 40056, // Xã Nguyễn Văn Linh
+  '12004': 74551, // Xã Như Quỳnh
+  '11992': 39945, // Xã Lạc Đạo
+  '11995': 31024, // Xã Đại Đồng
+  '12031': 41462, // Xã Nghĩa Trụ
+  '12025': 33576, // Xã Phụng Công
+  '12019': 39732, // Xã Văn Giang
+  '12049': 27490, // Xã Mễ Sở
+  '13225': 64990, // Phường Thái Bình
+  '12454': 86625, // Phường Trần Lãm
+  '12452': 47558, // Phường Trần Hưng Đạo
+  '12817': 43372, // Phường Trà Lý
+  '12466': 40675, // Phường Vũ Phúc
+  '12826': 47706, // Xã Thái Thụy
+  '12862': 35730, // Xã Đông Thụy Anh
+  '12859': 16818, // Xã Bắc Thụy Anh
+  '12865': 22404, // Xã Thụy Anh
+  '12904': 19793, // Xã Nam Thụy Anh
+  '12916': 16732, // Xã Bắc Thái Ninh
+  '12922': 27910, // Xã Thái Ninh
+  '12943': 23973, // Xã Đông Thái Ninh
+  '12961': 18486, // Xã Nam Thái Ninh
+  '12919': 16222, // Xã Tây Thái Ninh
+  '12850': 15317, // Xã Tây Thụy Anh
+  '12970': 38293, // Xã Tiền Hải
+  '13039': 23945, // Xã Tây Tiền Hải
+  '13021': 15539, // Xã Ái Quốc
+  '13003': 27367, // Xã Đồng Châu
+  '12988': 34166, // Xã Đông Tiền Hải
+  '13057': 32698, // Xã Nam Cường
+  '13066': 21658, // Xã Hưng Phú
+  '13063': 26831, // Xã Nam Tiền Hải
+  '12472': 44379, // Xã Quỳnh Phụ
+  '12511': 23601, // Xã Minh Thọ
+  '12532': 19534, // Xã Nguyễn Du
+  '12577': 31862, // Xã Quỳnh An
+  '12517': 22329, // Xã Ngọc Lâm
+  '12526': 21716, // Xã Đồng Bằng
+  '12499': 25036, // Xã A Sào
+  '12523': 38126, // Xã Phụ Dực
+  '12583': 20064, // Xã Tân Tiến
+  '12586': 48680, // Xã Hưng Hà
+  '12634': 29930, // Xã Tiên La
+  '12676': 22354, // Xã Lê Quý Đôn
+  '12685': 22644, // Xã Hồng Minh
+  '12631': 27750, // Xã Thần Khê
+  '12619': 33109, // Xã Diên Hà
+  '12595': 28984, // Xã Ngự Thiên
+  '12613': 45705, // Xã Long Hưng
+  '12688': 44105, // Xã Đông Hưng
+  '12700': 36748, // Xã Bắc Tiên Hưng
+  '12736': 22558, // Xã Đông Tiên Hưng
+  '12775': 22412, // Xã Nam Đông Hưng
+  '12745': 24242, // Xã Bắc Đông Quan
+  '12694': 21539, // Xã Bắc Đông Hưng
+  '12793': 22274, // Xã Đông Quan
+  '12763': 28545, // Xã Nam Tiên Hưng
+  '12754': 24725, // Xã Tiên Hưng
+  '13120': 23985, // Xã Lê Lợi
+  '13075': 42808, // Xã Kiến Xương
+  '13132': 17443, // Xã Quang Lịch
+  '13141': 24622, // Xã Vũ Quý
+  '13183': 22277, // Xã Bình Thanh
+  '13186': 21170, // Xã Bình Định
+  '13159': 20991, // Xã Hồng Vũ
+  '13096': 18348, // Xã Bình Nguyên
+  '13093': 18717, // Xã Trà Giang
+  '13192': 39167, // Xã Vũ Thư
+  '13222': 23354, // Xã Thư Trì
+  '13246': 26095, // Xã Tân Thuận
+  '13264': 32189, // Xã Thư Vũ
+  '13279': 33659, // Xã Vũ Tiên
+  '13219': 31372  // Xã Vạn Xuân
+};
+
+export const PROVINCE_TOTAL_POPULATION = 3256389;
+
+export const getCommunePopulation = (communeCode: string): number => {
+  return COMMUNE_POPULATION_MAP[communeCode] || 25000;
+};
+
 export const OFFICIAL_COMMUNES_CATALOG: CommuneCatalogItem[] = [
-  {"id":"c-11953","tkcsName":"TKCS Phố Hiến","tkcsCode":"TK001","communeName":"Phường Phố Hiến","communeCode":"11953","bkNongLamThuySan":110,"bkCongNghiepXayDung":517,"bkThuongMaiDichVu":2245,"bkThuKhacLuong":4473,"bkTongSo":7345,"ttNongLamThuySan":1.5,"ttCongNghiepXayDung":7.04,"ttThuongMaiDichVu":30.57,"ttThuKhacLuong":60.9,"ttTongSo":100,"mauNongLamThuySan":4,"mauCongNghiepXayDung":19,"mauThuongMaiDichVu":83,"mauThuKhacLuong":164,"mauTongSo":270,"targetTotalHH":7345,"targetOfficialHH":270,"sectorTargets":{"s1":4,"s2":19,"s3":83,"s4":164}},
-  {"id":"c-11983","tkcsName":"TKCS Phố Hiến","tkcsCode":"TK001","communeName":"Phường Sơn Nam","communeCode":"11983","bkNongLamThuySan":819,"bkCongNghiepXayDung":545,"bkThuongMaiDichVu":805,"bkThuKhacLuong":1451,"bkTongSo":3620,"ttNongLamThuySan":22.62,"ttCongNghiepXayDung":15.06,"ttThuongMaiDichVu":22.24,"ttThuKhacLuong":40.08,"ttTongSo":100,"mauNongLamThuySan":29,"mauCongNghiepXayDung":20,"mauThuongMaiDichVu":29,"mauThuKhacLuong":52,"mauTongSo":130,"targetTotalHH":3620,"targetOfficialHH":130,"sectorTargets":{"s1":29,"s2":20,"s3":29,"s4":52}},
-  {"id":"c-11980","tkcsName":"TKCS Phố Hiến","tkcsCode":"TK001","communeName":"Phường Hồng Châu","communeCode":"11980","bkNongLamThuySan":479,"bkCongNghiepXayDung":431,"bkThuongMaiDichVu":296,"bkThuKhacLuong":594,"bkTongSo":1800,"ttNongLamThuySan":26.61,"ttCongNghiepXayDung":23.94,"ttThuongMaiDichVu":16.44,"ttThuKhacLuong":33,"ttTongSo":100,"mauNongLamThuySan":24,"mauCongNghiepXayDung":21,"mauThuongMaiDichVu":15,"mauThuKhacLuong":30,"mauTongSo":90,"targetTotalHH":1800,"targetOfficialHH":90,"sectorTargets":{"s1":24,"s2":21,"s3":15,"s4":30}},
-  {"id":"c-12103","tkcsName":"TKCS Mỹ Hào","tkcsCode":"TK004","communeName":"Phường Mỹ Hào","communeCode":"12103","bkNongLamThuySan":362,"bkCongNghiepXayDung":3394,"bkThuongMaiDichVu":1531,"bkThuKhacLuong":879,"bkTongSo":6166,"ttNongLamThuySan":5.87,"ttCongNghiepXayDung":55.04,"ttThuongMaiDichVu":24.83,"ttThuKhacLuong":14.26,"ttTongSo":100,"mauNongLamThuySan":12,"mauCongNghiepXayDung":110,"mauThuongMaiDichVu":50,"mauThuKhacLuong":28,"mauTongSo":200,"targetTotalHH":6166,"targetOfficialHH":200,"sectorTargets":{"s1":12,"s2":110,"s3":50,"s4":28}},
-  {"id":"c-12133","tkcsName":"TKCS Mỹ Hào","tkcsCode":"TK004","communeName":"Phường Đường Hào","communeCode":"12133","bkNongLamThuySan":236,"bkCongNghiepXayDung":2824,"bkThuongMaiDichVu":1217,"bkThuKhacLuong":520,"bkTongSo":4797,"ttNongLamThuySan":4.92,"ttCongNghiepXayDung":58.87,"ttThuongMaiDichVu":25.37,"ttThuKhacLuong":10.84,"ttTongSo":100,"mauNongLamThuySan":8,"mauCongNghiepXayDung":94,"mauThuongMaiDichVu":41,"mauThuKhacLuong":17,"mauTongSo":160,"targetTotalHH":4797,"targetOfficialHH":160,"sectorTargets":{"s1":8,"s2":94,"s3":41,"s4":17}},
-  {"id":"c-12127","tkcsName":"TKCS Mỹ Hào","tkcsCode":"TK004","communeName":"Phường Thượng Hồng","communeCode":"12127","bkNongLamThuySan":248,"bkCongNghiepXayDung":3187,"bkThuongMaiDichVu":519,"bkThuKhacLuong":901,"bkTongSo":4855,"ttNongLamThuySan":5.11,"ttCongNghiepXayDung":65.64,"ttThuongMaiDichVu":10.69,"ttThuKhacLuong":18.56,"ttTongSo":100,"mauNongLamThuySan":8,"mauCongNghiepXayDung":98,"mauThuongMaiDichVu":16,"mauThuKhacLuong":28,"mauTongSo":150,"targetTotalHH":4855,"targetOfficialHH":150,"sectorTargets":{"s1":8,"s2":98,"s3":16,"s4":28}},
+  {"id":"c-11953","tkcsName":"TKCS Phố Hiến","tkcsCode":"TK001","communeName":"Phường Phố Hiến","communeCode":"11953","population":65136,"bkNongLamThuySan":110,"bkCongNghiepXayDung":517,"bkThuongMaiDichVu":2245,"bkThuKhacLuong":4473,"bkTongSo":7345,"ttNongLamThuySan":1.5,"ttCongNghiepXayDung":7.04,"ttThuongMaiDichVu":30.57,"ttThuKhacLuong":60.9,"ttTongSo":100,"mauNongLamThuySan":4,"mauCongNghiepXayDung":19,"mauThuongMaiDichVu":83,"mauThuKhacLuong":164,"mauTongSo":270,"targetTotalHH":7345,"targetOfficialHH":270,"sectorTargets":{"s1":4,"s2":19,"s3":83,"s4":164}},
+  {"id":"c-11983","tkcsName":"TKCS Phố Hiến","tkcsCode":"TK001","communeName":"Phường Sơn Nam","communeCode":"11983","population":30571,"bkNongLamThuySan":819,"bkCongNghiepXayDung":545,"bkThuongMaiDichVu":805,"bkThuKhacLuong":1451,"bkTongSo":3620,"ttNongLamThuySan":22.62,"ttCongNghiepXayDung":15.06,"ttThuongMaiDichVu":22.24,"ttThuKhacLuong":40.08,"ttTongSo":100,"mauNongLamThuySan":29,"mauCongNghiepXayDung":20,"mauThuongMaiDichVu":29,"mauThuKhacLuong":52,"mauTongSo":130,"targetTotalHH":3620,"targetOfficialHH":130,"sectorTargets":{"s1":29,"s2":20,"s3":29,"s4":52}},
+  {"id":"c-11980","tkcsName":"TKCS Phố Hiến","tkcsCode":"TK001","communeName":"Phường Hồng Châu","communeCode":"11980","population":18587,"bkNongLamThuySan":479,"bkCongNghiepXayDung":431,"bkThuongMaiDichVu":296,"bkThuKhacLuong":594,"bkTongSo":1800,"ttNongLamThuySan":26.61,"ttCongNghiepXayDung":23.94,"ttThuongMaiDichVu":16.44,"ttThuKhacLuong":33,"ttTongSo":100,"mauNongLamThuySan":24,"mauCongNghiepXayDung":21,"mauThuongMaiDichVu":15,"mauThuKhacLuong":30,"mauTongSo":90,"targetTotalHH":1800,"targetOfficialHH":90,"sectorTargets":{"s1":24,"s2":21,"s3":15,"s4":30}},
+  {"id":"c-12103","tkcsName":"TKCS Mỹ Hào","tkcsCode":"TK004","communeName":"Phường Mỹ Hào","communeCode":"12103","population":51935,"bkNongLamThuySan":362,"bkCongNghiepXayDung":3394,"bkThuongMaiDichVu":1531,"bkThuKhacLuong":879,"bkTongSo":6166,"ttNongLamThuySan":5.87,"ttCongNghiepXayDung":55.04,"ttThuongMaiDichVu":24.83,"ttThuKhacLuong":14.26,"ttTongSo":100,"mauNongLamThuySan":12,"mauCongNghiepXayDung":110,"mauThuongMaiDichVu":50,"mauThuKhacLuong":28,"mauTongSo":200,"targetTotalHH":6166,"targetOfficialHH":200,"sectorTargets":{"s1":12,"s2":110,"s3":50,"s4":28}},
+  {"id":"c-12133","tkcsName":"TKCS Mỹ Hào","tkcsCode":"TK004","communeName":"Phường Đường Hào","communeCode":"12133","population":37957,"bkNongLamThuySan":236,"bkCongNghiepXayDung":2824,"bkThuongMaiDichVu":1217,"bkThuKhacLuong":520,"bkTongSo":4797,"ttNongLamThuySan":4.92,"ttCongNghiepXayDung":58.87,"ttThuongMaiDichVu":25.37,"ttThuKhacLuong":10.84,"ttTongSo":100,"mauNongLamThuySan":8,"mauCongNghiepXayDung":94,"mauThuongMaiDichVu":41,"mauThuKhacLuong":17,"mauTongSo":160,"targetTotalHH":4797,"targetOfficialHH":160,"sectorTargets":{"s1":8,"s2":94,"s3":41,"s4":17}},
+  {"id":"c-12127","tkcsName":"TKCS Mỹ Hào","tkcsCode":"TK004","communeName":"Phường Thượng Hồng","communeCode":"12127","population":38520,"bkNongLamThuySan":248,"bkCongNghiepXayDung":3187,"bkThuongMaiDichVu":519,"bkThuKhacLuong":901,"bkTongSo":4855,"ttNongLamThuySan":5.11,"ttCongNghiepXayDung":65.64,"ttThuongMaiDichVu":10.69,"ttThuKhacLuong":18.56,"ttTongSo":100,"mauNongLamThuySan":8,"mauCongNghiepXayDung":98,"mauThuongMaiDichVu":16,"mauThuKhacLuong":28,"mauTongSo":150,"targetTotalHH":4855,"targetOfficialHH":150,"sectorTargets":{"s1":8,"s2":98,"s3":16,"s4":28}},
   {"id":"c-11977","tkcsName":"TKCS Phố Hiến","tkcsCode":"TK001","communeName":"Xã Tân Hưng","communeCode":"11977","bkNongLamThuySan":935,"bkCongNghiepXayDung":448,"bkThuongMaiDichVu":499,"bkThuKhacLuong":1237,"bkTongSo":3119,"ttNongLamThuySan":29.98,"ttCongNghiepXayDung":14.36,"ttThuongMaiDichVu":16,"ttThuKhacLuong":39.66,"ttTongSo":100,"mauNongLamThuySan":33,"mauCongNghiepXayDung":16,"mauThuongMaiDichVu":17,"mauThuKhacLuong":44,"mauTongSo":110,"targetTotalHH":3119,"targetOfficialHH":110,"sectorTargets":{"s1":33,"s2":16,"s3":17,"s4":44}},
   {"id":"c-12337","tkcsName":"TKCS Hoàng Hoa Thám","tkcsCode":"TK007","communeName":"Xã Hoàng Hoa Thám","communeCode":"12337","bkNongLamThuySan":891,"bkCongNghiepXayDung":1740,"bkThuongMaiDichVu":1213,"bkThuKhacLuong":1428,"bkTongSo":5272,"ttNongLamThuySan":16.9,"ttCongNghiepXayDung":33,"ttThuongMaiDichVu":23.01,"ttThuKhacLuong":27.09,"ttTongSo":100,"mauNongLamThuySan":31,"mauCongNghiepXayDung":59,"mauThuongMaiDichVu":41,"mauThuKhacLuong":49,"mauTongSo":180,"targetTotalHH":5272,"targetOfficialHH":180,"sectorTargets":{"s1":31,"s2":59,"s3":41,"s4":49}},
   {"id":"c-12364","tkcsName":"TKCS Hoàng Hoa Thám","tkcsCode":"TK007","communeName":"Xã Tiên Lữ","communeCode":"12364","bkNongLamThuySan":1272,"bkCongNghiepXayDung":896,"bkThuongMaiDichVu":637,"bkThuKhacLuong":798,"bkTongSo":3603,"ttNongLamThuySan":35.3,"ttCongNghiepXayDung":24.87,"ttThuongMaiDichVu":17.68,"ttThuKhacLuong":22.15,"ttTongSo":100,"mauNongLamThuySan":39,"mauCongNghiepXayDung":27,"mauThuongMaiDichVu":20,"mauThuKhacLuong":24,"mauTongSo":110,"targetTotalHH":3603,"targetOfficialHH":110,"sectorTargets":{"s1":39,"s2":27,"s3":20,"s4":24}},

@@ -69,8 +69,17 @@ export default function QuestionnaireModal({
     const finalStatus = newStatus || form.surveyStatus || 'DANG_NHAP';
     const assignedSurveyor = allSurveyors.find(s => s.id === form.assignedSurveyorId);
     
+    const memVal = form.membersCount === '' || isNaN(Number(form.membersCount)) || Number(form.membersCount) <= 0 
+      ? 1 
+      : Number(form.membersCount);
+    const workVal = form.workingMembersCount === '' || isNaN(Number(form.workingMembersCount)) || Number(form.workingMembersCount) < 0 
+      ? 0 
+      : Number(form.workingMembersCount);
+
     const payload = {
       ...form,
+      membersCount: memVal,
+      workingMembersCount: workVal,
       surveyStatus: finalStatus,
       assignedSurveyorName: assignedSurveyor ? assignedSurveyor.name : form.assignedSurveyorName,
       updatedBy: currentUser?.name || 'Hệ thống',
@@ -474,23 +483,47 @@ export default function QuestionnaireModal({
             />
           </div>
           <div>
-            <span className="text-[10px] text-slate-500 block">Tổng nhân khẩu:</span>
+            <span className="text-[10px] text-slate-600 block font-bold" title="Người dùng tự gõ chính xác theo phiếu điều tra thực tế">
+              Tổng nhân khẩu (Tự gõ):
+            </span>
             <input 
               type="number" 
               disabled={isLocked}
-              value={form.membersCount || 2} 
-              onChange={e => setForm({ ...form, membersCount: Number(e.target.value) })}
-              className="w-full bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold text-center disabled:bg-slate-100"
+              value={form.membersCount !== undefined && form.membersCount !== null ? form.membersCount : ''} 
+              onChange={e => {
+                const val = e.target.value;
+                setForm({ ...form, membersCount: val === '' ? '' : parseInt(val, 10) });
+              }}
+              onBlur={() => {
+                if (form.membersCount === '' || isNaN(Number(form.membersCount)) || Number(form.membersCount) <= 0) {
+                  setForm((prev: any) => ({ ...prev, membersCount: 1 }));
+                }
+              }}
+              min="1"
+              placeholder="Nhập số..."
+              className="w-full bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold text-center disabled:bg-slate-100 text-sky-950 focus:border-sky-600 focus:outline-none"
             />
           </div>
           <div>
-            <span className="text-[10px] text-slate-500 block">Số người làm việc:</span>
+            <span className="text-[10px] text-slate-600 block font-bold" title="Người dùng tự gõ chính xác theo phiếu điều tra thực tế">
+              Số người làm việc (Tự gõ):
+            </span>
             <input 
               type="number" 
               disabled={isLocked}
-              value={form.workingMembersCount || 1} 
-              onChange={e => setForm({ ...form, workingMembersCount: Number(e.target.value) })}
-              className="w-full bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold text-center disabled:bg-slate-100"
+              value={form.workingMembersCount !== undefined && form.workingMembersCount !== null ? form.workingMembersCount : ''} 
+              onChange={e => {
+                const val = e.target.value;
+                setForm({ ...form, workingMembersCount: val === '' ? '' : parseInt(val, 10) });
+              }}
+              onBlur={() => {
+                if (form.workingMembersCount === '' || isNaN(Number(form.workingMembersCount)) || Number(form.workingMembersCount) < 0) {
+                  setForm((prev: any) => ({ ...prev, workingMembersCount: 0 }));
+                }
+              }}
+              min="0"
+              placeholder="Nhập số..."
+              className="w-full bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold text-center disabled:bg-slate-100 text-sky-950 focus:border-sky-600 focus:outline-none"
             />
           </div>
           <div>
@@ -1193,6 +1226,33 @@ export default function QuestionnaireModal({
                     </tr>
                   </tbody>
                 </table>
+              </div>
+
+              {/* Bảng chỉ tiêu nhân khẩu và thu nhập bình quân của hộ */}
+              <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-2xs">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-slate-800 flex-1">
+                  <div className="bg-white p-2 rounded border border-amber-200">
+                    <span className="text-slate-500 block text-[11px] font-medium">Tổng nhân khẩu (Gõ theo ĐT):</span>
+                    <strong className="text-sm font-black text-rose-900">{form.membersCount || 1} người</strong>
+                  </div>
+                  <div className="bg-white p-2 rounded border border-amber-200">
+                    <span className="text-slate-500 block text-[11px] font-medium">Số người làm việc:</span>
+                    <strong className="text-sm font-black text-slate-900">{form.workingMembersCount ?? 0} người</strong>
+                  </div>
+                  <div className="bg-white p-2 rounded border border-amber-200 col-span-2 md:col-span-1">
+                    <span className="text-slate-500 block text-[11px] font-medium">Tổng thu nhập hộ:</span>
+                    <strong className="text-sm font-black text-emerald-900">{income.total.toLocaleString()} (1.000 đ)</strong>
+                  </div>
+                </div>
+
+                <div className="bg-emerald-800 text-white p-2.5 rounded-lg border border-emerald-900 shadow-xs md:min-w-[220px] text-right">
+                  <span className="text-emerald-200 block text-[10px] font-bold uppercase">
+                    TNBQ 1 người / tháng:
+                  </span>
+                  <strong className="text-base font-black text-amber-300 block mt-0.5">
+                    {Math.round(income.total / (Number(form.membersCount) || 1) / 12).toLocaleString()} đ/người/tháng
+                  </strong>
+                </div>
               </div>
 
               {/* Signature section */}

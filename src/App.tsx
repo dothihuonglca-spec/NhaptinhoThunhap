@@ -11,7 +11,7 @@ import {
   AlertCircle, RefreshCw, Filter, Search, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight,
   Check, Cloud, FileText, Loader2, TableProperties, MapPin, Building2, Hash, BookOpen, Copy, 
   Shield, ShieldCheck, Lock, Unlock, Eye, EyeOff, CheckSquare, Square, UserCheck, ShieldAlert, AlertTriangle, X,
-  LogOut, LogIn, KeyRound, User
+  LogOut, LogIn, KeyRound, User, TrendingUp
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType, safeFirestoreWrite, isQuotaExceeded } from './firebase';
 import { collection, getDocs, addDoc, deleteDoc, doc, setDoc, query, onSnapshot, writeBatch } from 'firebase/firestore';
@@ -22,6 +22,7 @@ import QuestionnaireModal from './components/QuestionnaireModal';
 import CatalogModal from './components/CatalogModal';
 import SurveyorManagement from './components/SurveyorManagement';
 import ExcelHeaderConfigModal from './components/ExcelHeaderConfigModal';
+import { IncomeMacroControl } from './components/IncomeMacroControl';
 import bannerImg from './assets/images/rural_vietnam_banner_1790736956083.jpg';
 import { OFFICIAL_COMMUNES_CATALOG } from './data/communesCatalog';
 import { 
@@ -64,7 +65,7 @@ export const DEFAULT_SURVEYORS: Surveyor[] = [
   ...OFFICIAL_PERSONNEL_LIST
 ];
 
-interface Household {
+export interface Household {
   id: string;
   communeId: string;
   tkcsCode: string;
@@ -93,7 +94,7 @@ interface Household {
   questionnaire?: FullQuestionnaire;
 }
 
-interface SurveyArea {
+export interface SurveyArea {
   id: string;
   communeId: string;
   code: string; // 001, 002...
@@ -145,7 +146,7 @@ const SECTOR_NAMES = {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'import' | 'entry' | 'tnh' | 'database' | 'catalog' | 'surveyors'>('import');
+  const [activeTab, setActiveTab] = useState<'import' | 'entry' | 'tnh' | 'macro_control' | 'database' | 'catalog' | 'surveyors'>('import');
   
   const [communes, setCommunes] = useState<Commune[]>([]);
   const [areas, setAreas] = useState<SurveyArea[]>([]);
@@ -2030,6 +2031,25 @@ export default function App() {
     return calculateFullIncome(h.questionnaire);
   };
 
+  // Kiểm tra hộ đã được điều tra thực tế (có phiếu nhập tin, trạng thái đã nhập/hoàn thành/đã duyệt, hoặc có thu nhập > 0)
+  const isHouseholdSurveyed = (h: Household): boolean => {
+    if (!h) return false;
+    if (h.surveyStatus === 'DA_HOAN_THANH' || h.surveyStatus === 'DA_DUYET' || h.surveyStatus === 'DANG_NHAP') return true;
+    if (h.questionnaire && (
+      h.questionnaire.muc1_has || 
+      h.questionnaire.muc2_has || 
+      h.questionnaire.muc3_has || 
+      h.questionnaire.muc4_has || 
+      h.questionnaire.muc5_has || 
+      h.questionnaire.muc6_has || 
+      h.questionnaire.muc7_has || 
+      (h.questionnaire.muc1_rows && h.questionnaire.muc1_rows.length > 0)
+    )) return true;
+    const inc = calculateHouseholdTotalIncome(h);
+    if (inc.total > 0) return true;
+    return false;
+  };
+
   // Danh sách xã thuộc phạm vi Tổng hợp nhanh đang xem
   const tnhScopeCommunes = useMemo(() => {
     if (tnhScopeMode === 'COMMUNE_QUICK' || tnhScopeMode === 'COMMUNE_SECTOR') {
@@ -2058,28 +2078,30 @@ export default function App() {
 
   // Hộ gia đình thuộc phạm vi Tổng hợp nhanh đang xem
   const tnhScopeHouseholds = useMemo(() => {
+    let list = households;
     if (tnhScopeMode === 'COMMUNE_QUICK' || tnhScopeMode === 'COMMUNE_SECTOR') {
       if (tnhSelectedCommuneId !== 'ALL') {
         const target = communes.find(c => c.id === tnhSelectedCommuneId || c.communeCode === tnhSelectedCommuneId);
-        return households.filter(h => h.communeId === tnhSelectedCommuneId || (Boolean(target?.communeCode) && h.communeCode === target?.communeCode));
-      }
-      if (selectedCommuneId !== 'ALL') {
+        list = list.filter(h => h.communeId === tnhSelectedCommuneId || (Boolean(target?.communeCode) && h.communeCode === target?.communeCode));
+      } else if (selectedCommuneId !== 'ALL') {
         const target = communes.find(c => c.id === selectedCommuneId || c.communeCode === selectedCommuneId);
-        return households.filter(h => h.communeId === selectedCommuneId || (Boolean(target?.communeCode) && h.communeCode === target?.communeCode));
+        list = list.filter(h => h.communeId === selectedCommuneId || (Boolean(target?.communeCode) && h.communeCode === target?.communeCode));
       }
-      return households;
-    }
-    if (tnhScopeMode === 'TKCS_SECTOR') {
+    } else if (tnhScopeMode === 'TKCS_SECTOR') {
       if (tnhSelectedTkcs !== 'ALL') {
         const matchingCommuneCodes = new Set(communes.filter(c => c.tkcsCode === tnhSelectedTkcs).map(c => c.communeCode));
         const matchingCommuneIds = new Set(communes.filter(c => c.tkcsCode === tnhSelectedTkcs).map(c => c.id));
-        return households.filter(h => h.tkcsCode === tnhSelectedTkcs || matchingCommuneCodes.has(h.communeCode) || matchingCommuneIds.has(h.communeId));
+        list = list.filter(h => h.tkcsCode === tnhSelectedTkcs || matchingCommuneCodes.has(h.communeCode) || matchingCommuneIds.has(h.communeId));
       }
-      return households;
     }
-    // PROVINCE_SECTOR
-    return households;
-  }, [households, communes, tnhScopeMode, tnhSelectedCommuneId, selectedCommuneId, tnhSelectedTkcs, selectedTkcs]);
+
+    // Nếu người dùng chọn Địa bàn cụ thể ở bộ lọc thì tổng hợp đúng theo địa bàn đó
+    if (selectedAreaId !== 'ALL') {
+      list = list.filter(h => h.areaId === selectedAreaId || h.areaCode === selectedAreaId);
+    }
+
+    return list;
+  }, [households, communes, tnhScopeMode, tnhSelectedCommuneId, selectedCommuneId, tnhSelectedTkcs, selectedTkcs, selectedAreaId]);
 
   // Tính toán Tổng hợp nhanh kết nối chuẩn xác Danh mục Xã / TKCS và Phiếu điều tra thực tế
   const tnhSummary = useMemo(() => {
@@ -2156,8 +2178,13 @@ export default function App() {
           : (totalBkAll > 0 ? Number(((bkCount / totalBkAll) * 100).toFixed(2)) : 0);
       }
 
-      // Kết quả từ phiếu điều tra thực tế
-      const sList = officialList.filter(h => Number(h.sectorCode) === code);
+      // KẾT QUẢ ĐIỀU TRA THỰC TẾ:
+      // "Có bao nhiêu tổng hợp đến đó ví dụ trong 1 địa bàn điều tra được 5 hộ tổng 15 nhân khẩu thì lúc tính Thu nhập Bình quân bạn chỉ chia cho 15 người"
+      const allSectorList = officialList.filter(h => Number(h.sectorCode) === code);
+      const surveyedSectorList = allSectorList.filter(h => isHouseholdSurveyed(h));
+      
+      // Tổng hợp đúng các hộ đã điều tra
+      const sList = surveyedSectorList;
       const surveyCount = sList.length;
       let groupIncome = 0;
       let groupMembers = 0;
@@ -2165,14 +2192,14 @@ export default function App() {
       sList.forEach(h => {
         const inc = calculateHouseholdTotalIncome(h).total;
         groupIncome += inc;
-        groupMembers += (h.membersCount || 1);
+        groupMembers += (Number(h.membersCount) || 1);
       });
 
-      // TNBQ đầu người / tháng theo loại hộ (= Tổng TN nhóm / Tổng số thành viên nhóm / 12) (Nghìn đồng)
+      // TNBQ đầu người / tháng theo loại hộ (= Tổng TN nhóm / Tổng số nhân khẩu nhóm đã điều tra / 12) (Nghìn đồng)
+      // CHIA ĐÚNG CHO TỔNG SỐ NHÂN KHẨU THỰC TẾ CỦA CÁC HỘ ĐÃ ĐIỀU TRA
       const perCapitaMonth = groupMembers > 0 ? (groupIncome / groupMembers / 12) : 0;
       
       // Suy rộng TNBQ = Tỉ trọng cơ cấu (%) * Thu nhập bình quân đầu người / tháng theo loại hộ
-      // (= (percent / 100) * perCapitaMonth)
       const extrapolatedIncomeYear = (percent / 100) * perCapitaMonth;
 
       return {
@@ -2181,6 +2208,7 @@ export default function App() {
         bkCount,
         percent,
         mauAlloc,
+        totalSampleInSector: allSectorList.length,
         surveyCount,
         groupMembers,
         groupIncome,
@@ -2193,14 +2221,17 @@ export default function App() {
 
     // Suy rộng TNBQ toàn xã / TKCS = Tổng cộng (Suy rộng của 4 loại hộ)
     const overallExtrapolated = sectorData.reduce((acc, s) => acc + s.extrapolatedIncomeYear, 0);
+    const totalSurveyedHH = sectorData.reduce((sum, s) => sum + s.surveyCount, 0);
     const totalMembers = sectorData.reduce((sum, s) => sum + s.groupMembers, 0);
     const totalIncomeAll = sectorData.reduce((acc, s) => acc + s.groupIncome, 0);
+    // Thu nhập bình quân trực tiếp: chia đúng cho tổng số nhân khẩu các hộ đã điều tra
     const overallDirectPerCapita = totalMembers > 0 ? Math.round(totalIncomeAll / totalMembers / 12) : 0;
 
     return {
       totalBkHH: totalBkAll,
       totalAllocMau: totalMauAll,
       totalHH: totalSurveyHH,
+      totalSurveyedHH,
       totalIncomeAll,
       totalMembers,
       sectorData,
@@ -2247,12 +2278,16 @@ export default function App() {
       // Group areas
       const cAreas = areas.filter(a => a.communeId === c.id || (Boolean(c.communeCode) && (a as any).communeCode === c.communeCode));
 
-      // Calculate total income and members
+      // Tính tổng thu nhập và tổng nhân khẩu CHỈ của các hộ đã điều tra
       let totalIncome = 0;
       let totalMembers = 0;
+      let surveyedCount = 0;
       officialHHs.forEach(h => {
-        totalIncome += calculateHouseholdTotalIncome(h).total;
-        totalMembers += (h.membersCount || 1);
+        if (isHouseholdSurveyed(h)) {
+          surveyedCount++;
+          totalIncome += calculateHouseholdTotalIncome(h).total;
+          totalMembers += (Number(h.membersCount) || 1);
+        }
       });
 
       // Sectors breakdown
@@ -2261,6 +2296,7 @@ export default function App() {
       const s3 = officialHHs.filter(h => Number(h.sectorCode) === 3).length;
       const s4 = officialHHs.filter(h => Number(h.sectorCode) === 4).length;
 
+      // TNBQ / tháng: chia đúng cho tổng nhân khẩu của các hộ đã điều tra
       const perCapitaMonth = totalMembers > 0 ? Math.round(totalIncome / totalMembers / 12) : 0;
 
       return {
@@ -2270,6 +2306,7 @@ export default function App() {
         totalHH,
         officialCount,
         backupCount: totalHH - officialCount,
+        surveyedCount,
         totalIncome,
         totalMembers,
         perCapitaMonth,
@@ -3117,10 +3154,44 @@ export default function App() {
     const startIdx = totalItems === 0 ? 0 : (validPage - 1) * (actualPageSize || 1) + 1;
     const endIdx = pageSize === -1 ? totalItems : Math.min(validPage * actualPageSize, totalItems);
 
+    // Tính toán tổng hợp nhanh theo phạm vi đang lọc: "Có bao nhiêu tổng hợp đến đó, chia đúng số nhân khẩu thực tế điều tra"
+    const surveyedInFilter = filteredHouseholds.filter(h => isHouseholdSurveyed(h));
+    const surveyedCount = surveyedInFilter.length;
+    let surveyedMembers = 0;
+    let surveyedIncome = 0;
+    surveyedInFilter.forEach(h => {
+      surveyedMembers += (Number(h.membersCount) || 1);
+      surveyedIncome += calculateHouseholdTotalIncome(h).total;
+    });
+    const perCapitaFilteredMonth = surveyedMembers > 0 ? Math.round(surveyedIncome / surveyedMembers / 12) : 0;
+
     return (
       <div className="flex flex-col w-full">
+        {/* Thanh tóm tắt kết quả tổng hợp nhanh cho danh sách đang xem */}
+        <div className="bg-emerald-50 border-t border-x border-emerald-300 px-3.5 py-2 rounded-t flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-3 text-emerald-950 font-medium">
+            <span className="font-bold flex items-center gap-1 text-emerald-900">
+              <BarChart3 className="w-4 h-4 text-emerald-700" />
+              <span>Tổng hợp (Phạm vi đang lọc):</span>
+            </span>
+            <span>Tổng số: <strong>{totalItems} hộ</strong></span>
+            <span>|</span>
+            <span>Đã điều tra: <strong className="text-emerald-800 font-bold">{surveyedCount} hộ</strong></span>
+            <span>|</span>
+            <span>Tổng nhân khẩu: <strong className="text-rose-900 font-black">{surveyedMembers} người</strong></span>
+            <span>|</span>
+            <span>Tổng thu nhập: <strong className="text-emerald-900 font-bold">{surveyedIncome.toLocaleString()} (1.000 đ)</strong></span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="bg-emerald-700 text-white px-2.5 py-1 rounded font-bold text-xs shadow-2xs">
+              TNBQ: {perCapitaFilteredMonth > 0 ? `${perCapitaFilteredMonth.toLocaleString()} đ/người/tháng` : '0 đ'} 
+            </span>
+          </div>
+        </div>
+
         {/* Scrollable Container with Sticky Thead */}
-        <div className={`overflow-x-auto overflow-y-auto ${customMaxHeight} border border-slate-300 rounded-t shadow-xs bg-white relative`}>
+        <div className={`overflow-x-auto overflow-y-auto ${customMaxHeight} border border-slate-300 shadow-xs bg-white relative`}>
           <table className="w-full border-collapse text-xs text-slate-800 whitespace-nowrap">
             <thead className="sticky top-0 z-20 bg-[#058da0] shadow-xs">
               <tr className="bg-[#058da0] text-white text-center font-bold">
@@ -3627,17 +3698,29 @@ export default function App() {
             <span className={activeTab === 'entry' ? 'text-teal-950 font-black' : 'text-white'}>2. Nhập tin hộ</span>
           </button>
 
-          {(currentUser.role === 'ADMIN' || currentUser.role === 'SUPERVISOR') && (
+          <button 
+            onClick={() => setActiveTab('tnh')}
+            className={`px-3.5 py-2 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap rounded-t-md font-bold ${
+              activeTab === 'tnh' 
+                ? 'bg-white text-teal-950 shadow-md border-t-2 border-x border-slate-300 border-t-amber-500 font-black' 
+                : 'text-white hover:bg-teal-700/80 border-transparent'
+            }`}
+          >
+            <BarChart3 className={`w-4 h-4 ${activeTab === 'tnh' ? 'text-teal-800' : 'text-teal-100'}`} />
+            <span className={activeTab === 'tnh' ? 'text-teal-950 font-black' : 'text-white'}>3. Tổng hợp nhanh</span>
+          </button>
+
+          {currentUser.role === 'ADMIN' && (
             <button 
-              onClick={() => setActiveTab('tnh')}
+              onClick={() => setActiveTab('macro_control')}
               className={`px-3.5 py-2 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap rounded-t-md font-bold ${
-                activeTab === 'tnh' 
+                activeTab === 'macro_control' 
                   ? 'bg-white text-teal-950 shadow-md border-t-2 border-x border-slate-300 border-t-amber-500 font-black' 
                   : 'text-white hover:bg-teal-700/80 border-transparent'
               }`}
             >
-              <BarChart3 className={`w-4 h-4 ${activeTab === 'tnh' ? 'text-teal-800' : 'text-teal-100'}`} />
-              <span className={activeTab === 'tnh' ? 'text-teal-950 font-black' : 'text-white'}>3. Tổng hợp nhanh</span>
+              <TrendingUp className={`w-4 h-4 ${activeTab === 'macro_control' ? 'text-teal-800' : 'text-amber-300'}`} />
+              <span className={activeTab === 'macro_control' ? 'text-teal-950 font-black' : 'text-white'}>4. Kiểm soát TNBQ (Admin)</span>
             </button>
           )}
 
@@ -3651,7 +3734,7 @@ export default function App() {
               }`}
             >
               <Database className={`w-4 h-4 ${activeTab === 'database' ? 'text-teal-800' : 'text-teal-100'}`} />
-              <span className={activeTab === 'database' ? 'text-teal-950 font-black' : 'text-white'}>4. Quản lý danh mục xã</span>
+              <span className={activeTab === 'database' ? 'text-teal-950 font-black' : 'text-white'}>5. Quản lý danh mục xã</span>
             </button>
           )}
 
@@ -3664,7 +3747,7 @@ export default function App() {
             }`}
           >
             <BookOpen className={`w-4 h-4 ${activeTab === 'catalog' ? 'text-teal-800' : 'text-amber-200'}`} />
-            <span className={activeTab === 'catalog' ? 'text-teal-950 font-black' : 'text-white'}>5. Danh mục tra cứu</span>
+            <span className={activeTab === 'catalog' ? 'text-teal-950 font-black' : 'text-white'}>6. Danh mục tra cứu</span>
           </button>
 
           {currentUser.role === 'ADMIN' && (
@@ -3677,7 +3760,7 @@ export default function App() {
               }`}
             >
               <Building2 className={`w-4 h-4 ${activeTab === 'surveyors' ? 'text-teal-800' : 'text-emerald-200'}`} />
-              <span className={activeTab === 'surveyors' ? 'text-teal-950 font-black' : 'text-white'}>6. Hệ thống</span>
+              <span className={activeTab === 'surveyors' ? 'text-teal-950 font-black' : 'text-white'}>7. Hệ thống</span>
             </button>
           )}
         </nav>
@@ -4416,6 +4499,54 @@ export default function App() {
               </div>
             </div>
 
+            {/* SURVEYOR PERSONAL PROGRESS SUMMARY BANNER */}
+            {currentUser?.role === 'SURVEYOR' && (() => {
+              const myAssignedHHs = households.filter(h => h.assignedSurveyorId === currentUser.id || currentUser.assignedAreas.includes('ALL') || currentUser.assignedAreas.includes(h.areaCode));
+              const mySurveyedHHs = myAssignedHHs.filter(h => isHouseholdSurveyed(h));
+              const myTotalMembers = mySurveyedHHs.reduce((acc, h) => acc + (Number(h.membersCount) || 1), 0);
+              const myTotalIncome = mySurveyedHHs.reduce((acc, h) => acc + calculateHouseholdTotalIncome(h).total, 0);
+              const myTnbq = myTotalMembers > 0 ? Math.round(myTotalIncome / myTotalMembers / 12) : 0;
+              const percentDone = myAssignedHHs.length > 0 ? Math.round((mySurveyedHHs.length / myAssignedHHs.length) * 100) : 0;
+
+              return (
+                <div className="bg-gradient-to-r from-teal-900 via-sky-950 to-teal-900 rounded-lg p-4 text-white shadow-md border border-teal-700 flex flex-col gap-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-teal-700/60 pb-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-black text-[11px] uppercase tracking-wider">
+                        TIẾN ĐỘ CỦA BẠN
+                      </span>
+                      <h3 className="font-black text-sm text-white flex items-center gap-1.5">
+                        <Users className="w-4 h-4 text-amber-300" />
+                        <span>Điều tra viên: {currentUser.name} ({currentUser.code})</span>
+                      </h3>
+                    </div>
+                    <span className="text-xs text-teal-200">
+                      Địa bàn phụ trách: <strong className="text-amber-300">{currentUser.assignedAreas.includes('ALL') ? 'Tất cả địa bàn' : currentUser.assignedAreas.join(', ')}</strong>
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                    <div className="bg-white/10 rounded p-2.5 border border-white/10">
+                      <span className="text-teal-200 block text-[11px]">Tổng số hộ phụ trách:</span>
+                      <strong className="text-lg font-black text-white">{myAssignedHHs.length} hộ</strong>
+                    </div>
+                    <div className="bg-white/10 rounded p-2.5 border border-white/10">
+                      <span className="text-emerald-200 block text-[11px]">Đã điều tra xong:</span>
+                      <strong className="text-lg font-black text-emerald-300">{mySurveyedHHs.length} / {myAssignedHHs.length} hộ ({percentDone}%)</strong>
+                    </div>
+                    <div className="bg-white/10 rounded p-2.5 border border-white/10">
+                      <span className="text-sky-200 block text-[11px]">Tổng nhân khẩu điều tra:</span>
+                      <strong className="text-lg font-black text-sky-200">{myTotalMembers} người</strong>
+                    </div>
+                    <div className="bg-white/10 rounded p-2.5 border border-white/10">
+                      <span className="text-amber-200 block text-[11px]">TNBQ bình quân tháng:</span>
+                      <strong className="text-lg font-black text-amber-300">{myTnbq > 0 ? `${myTnbq.toLocaleString()} đ` : '0 đ'}</strong>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* BẢNG 1: DANH MỤC XÃ & CHỈ TIÊU MẪU ĐIỀU TRA (19 CỘT THEO QUY CHUẨN) */}
             <div className="bg-white border border-slate-300 rounded-lg shadow-sm overflow-hidden flex flex-col">
               <div className="bg-[#058da0] text-white px-4 py-2.5 flex items-center justify-between gap-3 border-b border-[#047484]">
@@ -4653,16 +4784,18 @@ export default function App() {
 
                           {/* Kết quả điều tra thực tế & Liên kết TNH */}
                           <td className="p-2 border border-slate-300 text-center font-bold">
-                            {item.totalHH > 0 ? (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-100 text-emerald-900 border border-emerald-300 rounded font-bold text-[11px]">
-                                <CheckCircle2 className="w-3 h-3 text-emerald-700" />
-                                <span>{item.totalHH} hộ</span>
+                            {item.surveyedCount > 0 ? (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-100 text-emerald-900 border border-emerald-300 rounded font-bold text-[11px]" title={`Đã điều tra thực tế ${item.surveyedCount}/${item.officialCount} hộ, tổng ${item.totalMembers} nhân khẩu`}>
+                                <CheckCircle2 className="w-3 h-3 text-emerald-700 shrink-0" />
+                                <span>{item.surveyedCount} hộ ({item.totalMembers} ng)</span>
                               </span>
+                            ) : item.totalHH > 0 ? (
+                              <span className="text-slate-400 text-[11px]">0/{item.totalHH} hộ</span>
                             ) : (
                               <span className="text-slate-400 text-[11px] italic">Chưa nạp</span>
                             )}
                           </td>
-                          <td className="p-2 border border-slate-300 text-right font-black text-emerald-900 bg-emerald-50/40">
+                          <td className="p-2 border border-slate-300 text-right font-black text-emerald-900 bg-emerald-50/40" title={item.totalMembers > 0 ? `${item.totalMembers} nhân khẩu điều tra` : ''}>
                             {item.perCapitaMonth > 0 ? `${item.perCapitaMonth.toLocaleString()} đ` : '---'}
                           </td>
                           <td className="p-2 border border-slate-300 text-center" onClick={(e) => e.stopPropagation()}>
@@ -4736,7 +4869,13 @@ export default function App() {
                     <p className="text-xs text-amber-300 font-bold mt-0.5 flex items-center gap-1.5">
                       <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
                       <span>
-                        {tnhScopeMode === 'COMMUNE_SECTOR' || tnhScopeMode === 'COMMUNE_QUICK' ? (
+                        {selectedAreaId !== 'ALL' ? (
+                          (() => {
+                            const a = areas.find(item => item.id === selectedAreaId || item.code === selectedAreaId);
+                            const c = communes.find(item => item.id === a?.communeId || item.communeCode === (a as any)?.communeCode);
+                            return `📍 Đang liên kết ĐỊA BÀN: [${a?.code || selectedAreaId}] ${a?.name || 'Địa bàn'} (Thuộc Xã: [${c?.communeCode || '---'}] ${c?.communeName || ''} - Đã điều tra ${tnhSummary.totalSurveyedHH} hộ, ${tnhSummary.totalMembers} nhân khẩu)`;
+                          })()
+                        ) : tnhScopeMode === 'COMMUNE_SECTOR' || tnhScopeMode === 'COMMUNE_QUICK' ? (
                           tnhSelectedCommuneId !== 'ALL' ? (
                             (() => {
                               const c = communes.find(item => item.id === tnhSelectedCommuneId || item.communeCode === tnhSelectedCommuneId);
@@ -4766,7 +4905,7 @@ export default function App() {
 
                 <div className="flex items-center gap-2">
                   <span className="bg-black/20 px-3 py-1.5 rounded border border-white/20 text-xs font-bold text-white">
-                    Phạm vi: <strong className="text-amber-300">{tnhScopeCommunes.length} xã</strong> | Bảng kê: <strong className="text-amber-300">{tnhSummary.totalBkHH} hộ</strong> | Mẫu: <strong className="text-emerald-300">{tnhSummary.totalAllocMau} hộ</strong>
+                    Phạm vi: <strong className="text-amber-300">{tnhScopeCommunes.length} xã</strong> | Mẫu: <strong className="text-emerald-300">{tnhSummary.totalAllocMau} hộ</strong> | Đã điều tra: <strong className="text-amber-300">{tnhSummary.totalSurveyedHH} hộ ({tnhSummary.totalMembers} ng)</strong>
                   </span>
                 </div>
               </div>
@@ -4864,9 +5003,9 @@ export default function App() {
                         {tnhSummary.totalAllocMau.toLocaleString()}
                       </td>
                       <td className="border border-slate-300 p-3 text-center text-slate-900 font-black">
-                        {tnhSummary.totalHH} hộ ({tnhSummary.totalMembers} ng)
+                        {tnhSummary.totalSurveyedHH} / {tnhSummary.totalHH} hộ ({tnhSummary.totalMembers} ng)
                       </td>
-                      <td className="border border-slate-300 p-3 text-right text-emerald-950 font-black bg-emerald-100/40">
+                      <td className="border border-slate-300 p-3 text-right text-emerald-950 font-black bg-emerald-100/40" title={`${tnhSummary.totalMembers} nhân khẩu thực tế điều tra`}>
                         {tnhSummary.overallDirectPerCapita.toLocaleString()} đ
                       </td>
                       <td className="border border-slate-300 p-3 text-right text-rose-950 text-base font-black bg-amber-200/80 shadow-inner">
@@ -4882,13 +5021,13 @@ export default function App() {
             <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-xs text-amber-950 flex flex-col gap-1.5 shadow-2xs">
               <p className="font-bold text-amber-900 flex items-center gap-1.5 text-xs">
                 <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>Quy tắc tính toán tự động chuẩn hóa:</span>
+                <span>Quy tắc tính toán tự động chuẩn hóa theo điều tra:</span>
               </p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-0.5">
                 <div className="bg-white p-2.5 rounded border border-amber-200">
                   <span className="font-bold text-amber-900 block mb-0.5">1. TNBQ đầu người/tháng theo loại hộ (Cột K):</span>
                   <code className="text-[11px] font-bold text-emerald-900 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 block">
-                    = Tổng thu nhập nhóm / Tổng số nhân khẩu nhóm / 12
+                    = Tổng thu nhập nhóm / Tổng số nhân khẩu đã điều tra / 12
                   </code>
                 </div>
                 <div className="bg-white p-2.5 rounded border border-amber-200">
@@ -4989,7 +5128,25 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 4: QUẢN LÝ DANH MỤC XÃ & DỮ LIỆU */}
+        {/* TAB 4: KIỂM SOÁT THU NHẬP BÌNH QUÂN TOÀN TỈNH & 104 XÃ (DÀNH RIÊNG ADMIN) */}
+        {activeTab === 'macro_control' && currentUser.role === 'ADMIN' && (
+          <IncomeMacroControl
+            communes={communes}
+            households={households}
+            areas={areas}
+            currentUser={currentUser}
+            onNavigateToCommune={(communeCode) => {
+              setTnhScopeMode('COMMUNE_QUICK');
+              setTnhSelectedCommuneId(communeCode);
+              setSelectedCommuneId(communeCode);
+              setActiveTab('tnh');
+              showNotification('success', `Đã chuyển đến Tổng hợp nhanh xã [${communeCode}]`);
+            }}
+            showNotification={showNotification}
+          />
+        )}
+
+        {/* TAB 5: QUẢN LÝ DANH MỤC XÃ & DỮ LIỆU */}
         {activeTab === 'database' && (
           <div className="bg-white rounded border border-slate-300 shadow-sm p-6 flex flex-col gap-6">
             <div className="border-b border-slate-200 pb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
