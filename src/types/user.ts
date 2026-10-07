@@ -104,7 +104,7 @@ export const ROLE_LABELS: Record<UserRole, { label: string; color: string; desc:
     desc: 'Quyền nhập phiếu: Chỉ nhập và sửa phiếu thuộc các địa bàn được phân công, không sửa phiếu đã duyệt'
   },
   SUPERVISOR: {
-    label: 'Tổ trưởng / Giám sát viên',
+    label: 'Giám sát viên',
     color: 'bg-amber-100 text-amber-800 border-amber-300',
     desc: 'Quyền kiểm tra: Xem tổng hợp số liệu, kiểm tra tính hợp lệ và duyệt phiếu của các địa bàn'
   }
@@ -112,7 +112,7 @@ export const ROLE_LABELS: Record<UserRole, { label: string; color: string; desc:
 
 export const SURVEY_STATUS_LABELS: Record<SurveyStatus, { label: string; badge: string; iconColor: string }> = {
   CHUA_NHAP: {
-    label: 'Chưa nhập tin',
+    label: 'Tin chưa nhập',
     badge: 'bg-slate-100 text-slate-700 border-slate-300',
     iconColor: 'text-slate-400'
   },
@@ -122,12 +122,12 @@ export const SURVEY_STATUS_LABELS: Record<SurveyStatus, { label: string; badge: 
     iconColor: 'text-amber-500'
   },
   DA_HOAN_THANH: {
-    label: 'Đã nhập tin',
+    label: 'Tin đã nhập',
     badge: 'bg-emerald-100 text-emerald-800 border-emerald-300',
     iconColor: 'text-emerald-600'
   },
   DA_DUYET: {
-    label: 'Đã nhập tin (Đã duyệt)',
+    label: 'Tin đã nhập (Đã duyệt)',
     badge: 'bg-blue-100 text-blue-800 border-blue-300',
     iconColor: 'text-blue-600'
   }

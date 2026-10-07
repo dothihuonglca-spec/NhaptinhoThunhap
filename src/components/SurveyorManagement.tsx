@@ -724,7 +724,7 @@ export default function SurveyorManagement({
                   <option value="ALL">Tất cả vai trò</option>
                   <option value="ADMIN">Quản trị viên / Giám sát xã</option>
                   <option value="SURVEYOR">Điều tra viên</option>
-                  <option value="SUPERVISOR">Tổ trưởng / Giám sát viên</option>
+                  <option value="SUPERVISOR">Giám sát viên</option>
                 </select>
               </div>
 

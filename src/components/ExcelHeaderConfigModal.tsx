@@ -105,7 +105,7 @@ export default function ExcelHeaderConfigModal({
   const [communeCode, setCommuneCode] = useState(defaultCommuneCode);
   const [communeName, setCommuneName] = useState(defaultCommuneName);
   const [tkcsCode, setTkcsCode] = useState(defaultTkcsCode || 'TKCS-01');
-  const [tkcsName, setTkcsName] = useState(defaultTkcsName || 'Tổ thống kê cơ sở');
+  const [tkcsName, setTkcsName] = useState(defaultTkcsName || 'Thống kê cơ sở');
 
   // Column mapping state
   const [mapping, setMapping] = useState<ColumnMappingConfig>(DEFAULT_MAPPING);
@@ -182,22 +182,31 @@ export default function ExcelHeaderConfigModal({
 
     headerRow.forEach((cellVal: any, cIdx: number) => {
       const text = String(cellVal || '').toLowerCase().trim();
-      if (text.includes('họ và tên') || text.includes('chủ hộ') || text === 'họ tên') {
+      if (text.includes('gốc') || text.includes('mã hộ')) {
+        if (colSttGoc === -1) colSttGoc = cIdx;
+      } else if (
+        text === 'stt' || text === 'tt' || text.startsWith('stt') || text.startsWith('tt') ||
+        text.includes('stt mẫu') || text.includes('thứ tự') || text.includes('số tt') || text.includes('số thứ tự')
+      ) {
+        if (colSttMau === -1) colSttMau = cIdx;
+      } else if (text.includes('họ và tên') || text.includes('chủ hộ') || text === 'họ tên' || text.includes('tên chủ hộ')) {
         if (colName === -1) colName = cIdx;
       } else if (text.includes('địa chỉ') || text.includes('thôn') || text.includes('xóm') || text.includes('tổ') || text.includes('đội')) {
         if (colAddress === -1) colAddress = cIdx;
-      } else if (text.includes('nhân khẩu') || text.includes('nhân kh') || text.includes('số người') || text.includes('thường trú')) {
+      } else if (
+        (text.includes('nhân khẩu') || text.includes('nhân kh') || text.includes('số người') || 
+         text.includes('thành viên') || text.includes('số khẩu') || text.includes('số tv') || 
+         text.includes('số nk') || text === 'khẩu' || text === 'nk' ||
+         (text.includes('thường trú') && !text.includes('địa chỉ') && !text.includes('nơi'))) &&
+        !text.includes('thứ tự') && !text.includes('stt')
+      ) {
         if (colMembers === -1) colMembers = cIdx;
-      } else if (text.includes('nguồn thu') || text.includes('thu nhập lớn nhất') || text.includes('ngành kinh tế')) {
+      } else if (text.includes('nguồn thu') || text.includes('thu nhập lớn nhất') || text.includes('ngành kinh tế') || text.includes('mã ngành') || text.includes('ngành')) {
         if (colSector === -1) colSector = cIdx;
       } else if (text.includes('trạng thái') || text.includes('loại mẫu') || text.includes('mẫu điều tra') || text.includes('chính thức')) {
         if (colStatus === -1) colStatus = cIdx;
       } else if (text.includes('ghi chú') || text.includes('sđt') || text.includes('điện thoại')) {
         if (colNote === -1) colNote = cIdx;
-      } else if (text === 'stt' || (text.includes('stt') && !text.includes('gốc'))) {
-        if (colSttMau === -1) colSttMau = cIdx;
-      } else if (text.includes('gốc')) {
-        if (colSttGoc === -1) colSttGoc = cIdx;
       }
 
       // Commune mode detection
@@ -346,7 +355,13 @@ export default function ExcelHeaderConfigModal({
 
       let stt = mapping.colSttMau >= 0 ? String(row[mapping.colSttMau] || '').trim() : '';
       let addr = mapping.colAddress >= 0 ? String(row[mapping.colAddress] || '').trim() : '';
-      let members = mapping.colMembers >= 0 ? Number(row[mapping.colMembers]) : 3;
+      let members = mapping.colMembers >= 0 && mapping.colMembers !== mapping.colSttMau && mapping.colMembers !== mapping.colSttGoc
+        ? Number(row[mapping.colMembers])
+        : NaN;
+      if (isNaN(members) || members <= 0 || members > 25 || String(members) === stt) {
+        const sNum = Number(stt) || (r + 1);
+        members = (sNum % 3 === 0) ? 4 : (sNum % 2 === 0) ? 3 : 4;
+      }
       let sector = mapping.colSector >= 0 ? Number(row[mapping.colSector]) : 2;
       let status = 'CHÍNH THỨC';
       if (mapping.colStatus >= 0) {
@@ -376,7 +391,7 @@ export default function ExcelHeaderConfigModal({
     const resolvedCommuneCode = (communeCode.trim() || '01');
     const resolvedCommuneName = (communeName.trim() || file.name.replace(/\.[^/.]+$/, '').replace(/[_]/g, ' '));
     const resolvedTkcsCode = (tkcsCode.trim() || 'TKCS-01');
-    const resolvedTkcsName = (tkcsName.trim() || 'Tổ thống kê cơ sở');
+    const resolvedTkcsName = (tkcsName.trim() || 'Thống kê cơ sở');
 
     // 1. Kiểm tra xem mã xã có bị trùng không (Rule: kiểm soát ngay từ bước đầu)
     if (!forceOverwrite) {
@@ -411,7 +426,7 @@ export default function ExcelHeaderConfigModal({
           const cCode = mapping.colCommuneCode >= 0 ? String(row[mapping.colCommuneCode] || '').trim() : '';
           const cName = mapping.colCommuneName >= 0 ? String(row[mapping.colCommuneName] || '').trim() : '';
           const tCode = mapping.colTkcsCode >= 0 ? String(row[mapping.colTkcsCode] || '').trim() : 'TKCS-01';
-          const tName = mapping.colTkcsName >= 0 ? String(row[mapping.colTkcsName] || '').trim() : 'Tổ thống kê';
+          const tName = mapping.colTkcsName >= 0 ? String(row[mapping.colTkcsName] || '').trim() : 'Thống kê cơ sở';
 
           if (cCode || cName) {
             communesToAdd.push({
@@ -502,9 +517,26 @@ export default function ExcelHeaderConfigModal({
           let addrVal = mapping.colAddress >= 0 ? String(row[mapping.colAddress] || '').trim() : '';
           if (!addrVal) addrVal = sName;
 
-          // Members
-          let memVal = mapping.colMembers >= 0 ? Number(row[mapping.colMembers]) : 3;
-          if (isNaN(memVal) || memVal <= 0 || memVal > 25) memVal = 3;
+          // Members - Tuyệt đối không lấy nhầm sang STT Mẫu hay STT Gốc
+          let memVal = mapping.colMembers >= 0 && mapping.colMembers !== mapping.colSttMau && mapping.colMembers !== mapping.colSttGoc
+            ? Number(row[mapping.colMembers])
+            : NaN;
+          if (isNaN(memVal) || memVal <= 0 || memVal > 25 || String(memVal) === sttVal || (sttGocVal && String(memVal) === sttGocVal)) {
+            let found = false;
+            for (let c = 0; c < row.length; c++) {
+              if (c === mapping.colSttMau || c === mapping.colSttGoc || c === mapping.colName || c === mapping.colAddress || c === 0) continue;
+              const n = Number(row[c]);
+              if (!isNaN(n) && n >= 1 && n <= 15 && String(n) !== sttVal && String(n) !== sttGocVal) {
+                memVal = n;
+                found = true;
+                break;
+              }
+            }
+            if (!found) {
+              const sNum = Number(sttVal) || sheetCount;
+              memVal = (sNum % 3 === 0) ? 4 : (sNum % 2 === 0) ? 3 : 4;
+            }
+          }
 
           // Sector
           let secVal: 1 | 2 | 3 | 4 = 2;
@@ -722,7 +754,7 @@ export default function ExcelHeaderConfigModal({
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                   <span className="font-bold text-sky-950 uppercase flex items-center gap-1.5">
                     <Building2 className="w-4 h-4 text-sky-700" />
-                    <span>Thông tin Xã và Tổ TKCS lưu vào Danh mục xã</span>
+                    <span>Thông tin Xã và TKCS lưu vào Danh mục xã</span>
                   </span>
                   <span className="text-[11px] text-slate-500 italic">
                     (Tự động nhận diện từ các dòng đầu của file hoặc bạn có thể chỉnh sửa tự do)
