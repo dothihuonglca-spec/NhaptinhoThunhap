@@ -24,7 +24,7 @@ import SurveyorManagement from './components/SurveyorManagement';
 import ExcelHeaderConfigModal from './components/ExcelHeaderConfigModal';
 import { IncomeMacroControl } from './components/IncomeMacroControl';
 import { ReplaceHouseholdModal } from './components/ReplaceHouseholdModal';
-import bannerImg from './assets/images/rural_vietnam_banner_1790736956083.jpg';
+import bannerImg from './assets/images/background-ngoai-troi-dep_042633251.jpg';
 import { OFFICIAL_COMMUNES_CATALOG } from './data/communesCatalog';
 import { 
   Surveyor, UserRole, SurveyStatus, Department, DEFAULT_5_DEPARTMENTS, ROLE_LABELS, SURVEY_STATUS_LABELS 
