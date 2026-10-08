@@ -95,27 +95,13 @@ export const IncomeMacroControl: React.FC<IncomeMacroControlProps> = ({
       const officialHHs = cHouseholds.filter(h => h.sampleStatus === 'CHÍNH THỨC' || !h.sampleStatus);
       const surveyedHHs = officialHHs.filter(h => isHouseholdSurveyed(h));
 
-      // Check if this commune is the benchmark template (Phường Thượng Hồng 12127) or has actual surveys
-      const isBenchmarkTemplate = communeCode === '12127';
       const hasAnySurvey = surveyedHHs.length > 0;
 
       // Structure % (Tỷ trọng cơ cấu từ danh mục / bảng kê chính thức của từng xã)
-      let tt1: number | null = null;
-      let tt2: number | null = null;
-      let tt3: number | null = null;
-      let tt4: number | null = null;
-
-      if (isBenchmarkTemplate) {
-        tt1 = 0.05;
-        tt2 = 0.66;
-        tt3 = 0.11;
-        tt4 = 0.19;
-      } else {
-        tt1 = rawTt1 > 0 ? Number((rawTt1 / 100).toFixed(4)) : 0;
-        tt2 = rawTt2 > 0 ? Number((rawTt2 / 100).toFixed(4)) : 0;
-        tt3 = rawTt3 > 0 ? Number((rawTt3 / 100).toFixed(4)) : 0;
-        tt4 = rawTt4 > 0 ? Number((rawTt4 / 100).toFixed(4)) : 0;
-      }
+      const tt1 = rawTt1 > 0 ? Number((rawTt1 / 100).toFixed(4)) : 0;
+      const tt2 = rawTt2 > 0 ? Number((rawTt2 / 100).toFixed(4)) : 0;
+      const tt3 = rawTt3 > 0 ? Number((rawTt3 / 100).toFixed(4)) : 0;
+      const tt4 = rawTt4 > 0 ? Number((rawTt4 / 100).toFixed(4)) : 0;
 
       // Group Year Incomes (Nghìn đồng/năm)
       let groupYearS1: number | null = null;
@@ -132,46 +118,41 @@ export const IncomeMacroControl: React.FC<IncomeMacroControlProps> = ({
         const s1Income = s1List.reduce((acc, h) => acc + calculateFullIncome(h.questionnaire).total, 0);
         const s1Mem = s1List.reduce((acc, h) => acc + (Number(h.membersCount) || 1), 0);
         if (s1Mem > 0) groupYearS1 = Math.round(s1Income / s1Mem);
-      } else if (isBenchmarkTemplate) {
-        groupYearS1 = 42900;
       }
 
       if (s2List.length > 0) {
         const s2Income = s2List.reduce((acc, h) => acc + calculateFullIncome(h.questionnaire).total, 0);
         const s2Mem = s2List.reduce((acc, h) => acc + (Number(h.membersCount) || 1), 0);
         if (s2Mem > 0) groupYearS2 = Math.round(s2Income / s2Mem);
-      } else if (isBenchmarkTemplate) {
-        groupYearS2 = 95844;
       }
 
       if (s3List.length > 0) {
         const s3Income = s3List.reduce((acc, h) => acc + calculateFullIncome(h.questionnaire).total, 0);
         const s3Mem = s3List.reduce((acc, h) => acc + (Number(h.membersCount) || 1), 0);
         if (s3Mem > 0) groupYearS3 = Math.round(s3Income / s3Mem);
-      } else if (isBenchmarkTemplate) {
-        groupYearS3 = 89472;
       }
 
       if (s4List.length > 0) {
         const s4Income = s4List.reduce((acc, h) => acc + calculateFullIncome(h.questionnaire).total, 0);
         const s4Mem = s4List.reduce((acc, h) => acc + (Number(h.membersCount) || 1), 0);
         if (s4Mem > 0) groupYearS4 = Math.round(s4Income / s4Mem);
-      } else if (isBenchmarkTemplate) {
-        groupYearS4 = 82464;
       }
 
-      // Per Capita Income Year & Month
-      let perCapitaYear = 89975.30;
-      let perCapitaMonth = 7497.94;
+      // Per Capita Income Year & Month (Formula-based, dynamic)
+      let perCapitaYear = 0;
+      let perCapitaMonth = 0;
 
-      if (tt1 !== null && tt2 !== null && tt3 !== null && tt4 !== null &&
-          groupYearS1 !== null && groupYearS2 !== null && groupYearS3 !== null && groupYearS4 !== null) {
-        perCapitaYear = Number((
-          tt1 * groupYearS1 + 
-          tt2 * groupYearS2 + 
-          tt3 * groupYearS3 + 
-          tt4 * groupYearS4
-        ).toFixed(2));
+      let sumProducts = 0;
+      let sumWeights = 0;
+
+      if (tt1 > 0 && groupYearS1 !== null) { sumProducts += tt1 * groupYearS1; sumWeights += tt1; }
+      if (tt2 > 0 && groupYearS2 !== null) { sumProducts += tt2 * groupYearS2; sumWeights += tt2; }
+      if (tt3 > 0 && groupYearS3 !== null) { sumProducts += tt3 * groupYearS3; sumWeights += tt3; }
+      if (tt4 > 0 && groupYearS4 !== null) { sumProducts += tt4 * groupYearS4; sumWeights += tt4; }
+
+      if (sumWeights > 0) {
+        // Mathematically sound and precise weighted extrapolation formula
+        perCapitaYear = Number((sumProducts / sumWeights).toFixed(2));
         perCapitaMonth = Number((perCapitaYear / 12).toFixed(2));
       }
 
@@ -223,8 +204,8 @@ export const IncomeMacroControl: React.FC<IncomeMacroControlProps> = ({
     const totalYearFund = macroRows.reduce((acc, r) => acc + r.totalLocalIncomeYear, 0);
     const totalMonthFund = macroRows.reduce((acc, r) => acc + r.totalLocalIncomeMonth, 0);
     
-    const avgYear = totalPop > 0 ? Number((totalYearFund / totalPop).toFixed(2)) : 89975.30;
-    const avgMonth = totalPop > 0 ? Number((totalMonthFund / totalPop).toFixed(2)) : 7497.94;
+    const avgYear = totalPop > 0 ? Number((totalYearFund / totalPop).toFixed(2)) : 0;
+    const avgMonth = totalPop > 0 ? Number((totalMonthFund / totalPop).toFixed(2)) : 0;
     const totalSurveyedHHs = macroRows.reduce((acc, r) => acc + r.surveyedCount, 0);
     const totalSampleHHs = macroRows.reduce((acc, r) => acc + r.totalSample, 0);
 
