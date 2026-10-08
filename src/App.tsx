@@ -23,6 +23,7 @@ import CatalogModal from './components/CatalogModal';
 import SurveyorManagement from './components/SurveyorManagement';
 import ExcelHeaderConfigModal from './components/ExcelHeaderConfigModal';
 import { IncomeMacroControl } from './components/IncomeMacroControl';
+import { ReplaceHouseholdModal } from './components/ReplaceHouseholdModal';
 import bannerImg from './assets/images/rural_vietnam_banner_1790736956083.jpg';
 import { OFFICIAL_COMMUNES_CATALOG } from './data/communesCatalog';
 import { 
@@ -245,6 +246,13 @@ export default function App() {
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [deleteProgressText, setDeleteProgressText] = useState<string>('');
 
+  // Thay thế hộ mẫu bằng hộ dự phòng cùng địa bàn
+  const [householdToReplace, setHouseholdToReplace] = useState<Household | null>(null);
+  const [selectedBackupHouseholdId, setSelectedBackupHouseholdId] = useState<string>('');
+  const [replaceReason, setReplaceReason] = useState<string>('Vắng mặt dài ngày / Đi khỏi địa phương');
+  const [customReplaceReason, setCustomReplaceReason] = useState<string>('');
+  const [isReplacingHousehold, setIsReplacingHousehold] = useState<boolean>(false);
+
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   
   // 4 fields start blank for user to freely define
@@ -466,7 +474,7 @@ export default function App() {
           tkcsCode: data.tkcsCode || '',
           tkcsName: data.tkcsName || '',
           areaCode: data.areaCode || '001',
-          areaName: data.areaName || 'Địa bàn',
+          areaName: (data.areaName && data.areaName !== 'Địa bàn') ? data.areaName : (data.sheetName || data.areaName || ''),
           surveyStatus: data.surveyStatus || 'CHUA_NHAP',
           assignedSurveyorId: data.assignedSurveyorId || '',
           assignedSurveyorName: data.assignedSurveyorName || ''
@@ -519,6 +527,69 @@ export default function App() {
     setNotification({ type, message });
     setTimeout(() => setNotification(null), 4000);
   };
+
+  // Tự động đồng bộ và khôi phục tên địa bàn (tên sheet) từ danh sách địa bàn nếu hộ chưa có tên địa bàn
+  useEffect(() => {
+    if (households.length > 0) {
+      let hasHealed = false;
+      const healedHouseholds = households.map(h => {
+        const curName = (h.areaName || '').trim();
+        if (!curName || curName === 'Địa bàn' || curName === '---') {
+          const matchedArea = areas.find(a => 
+            (h.areaId && a.id === h.areaId) || 
+            (a.code === h.areaCode && (!h.communeId || a.communeId === h.communeId || (a as any).communeCode === h.communeCode))
+          ) || areas.find(a => a.code === h.areaCode);
+
+          if (matchedArea?.name && matchedArea.name.trim() && matchedArea.name !== 'Địa bàn') {
+            hasHealed = true;
+            return { ...h, areaName: matchedArea.name.trim() };
+          } else if ((h as any).sheetName && (h as any).sheetName.trim()) {
+            hasHealed = true;
+            return { ...h, areaName: (h as any).sheetName.trim() };
+          }
+        }
+        return h;
+      });
+
+      if (hasHealed) {
+        setHouseholds(healedHouseholds);
+        try { localStorage.setItem('cached_households', JSON.stringify(healedHouseholds)); } catch (e) {}
+      }
+
+      // Tự động khôi phục danh mục areas nếu đang trống mà households đã có
+      if (areas.length === 0) {
+        const areaMap = new Map<string, SurveyArea>();
+        households.forEach(h => {
+          const aCode = h.areaCode || '001';
+          const cId = h.communeId || 'commune-default';
+          const key = `${cId}-${aCode}`;
+          if (!areaMap.has(key)) {
+            const rawName = (h.areaName && h.areaName.trim() && h.areaName !== 'Địa bàn') 
+              ? h.areaName.trim() 
+              : ((h as any).sheetName || `Địa bàn ${aCode}`);
+            areaMap.set(key, {
+              id: h.areaId || `area-${cId}-${aCode}`,
+              communeId: cId,
+              code: aCode,
+              name: rawName,
+              householdCount: 1
+            });
+          } else {
+            const item = areaMap.get(key)!;
+            item.householdCount = (item.householdCount || 0) + 1;
+            if ((!item.name || item.name === 'Địa bàn') && h.areaName && h.areaName !== 'Địa bàn') {
+              item.name = h.areaName;
+            }
+          }
+        });
+        const reconstructed = Array.from(areaMap.values());
+        if (reconstructed.length > 0) {
+          setAreas(reconstructed);
+          try { localStorage.setItem('cached_areas', JSON.stringify(reconstructed)); } catch (e) {}
+        }
+      }
+    }
+  }, [areas, households]);
 
   // Tự động đồng bộ chọn xã theo danh mục xã vừa nạp hoặc đã có
   useEffect(() => {
@@ -1765,7 +1836,7 @@ export default function App() {
           }
         }
 
-        const areaNameFinal = detectedAreaName || sheetNameClean;
+        const areaNameFinal = sheetNameClean;
         const colIdx = {
           sttMau: -1,
           sampleStatus: -1,
@@ -1942,6 +2013,7 @@ export default function App() {
             communeName: commune.communeName,
             tkcsCode: commune.tkcsCode || '',
             tkcsName: commune.tkcsName || '',
+            areaName: areaNameFinal,
             sttMau: sttMauVal,
             sampleStatus: statusVal,
             sttGoc: sttGocVal,
@@ -1971,7 +2043,8 @@ export default function App() {
           ...h,
           id: 'hh-' + commune.id + '-' + areaCode + '-' + (hIdx + 1),
           areaId: areaId,
-          areaCode: areaCode
+          areaCode: areaCode,
+          areaName: areaNameFinal
         }));
 
         tempHouseholds.push(...finalizedHouseholds);
@@ -2735,6 +2808,108 @@ export default function App() {
     }, 50);
   };
 
+  // Xác nhận thay thế hộ mẫu bằng hộ dự phòng thuộc cùng địa bàn
+  const handleConfirmReplacement = async (
+    original: Household,
+    replacement: Household,
+    options: {
+      reason: string;
+      customNote: string;
+      keepSttMau: boolean;
+      transferSurveyor: boolean;
+    }
+  ) => {
+    const timestamp = new Date().toISOString();
+    const reasonFull = options.customNote ? `${options.reason} (${options.customNote})` : options.reason;
+
+    // 1. Cập nhật hộ dự phòng -> Thành hộ chính thức
+    const updatedReplacement: Household = {
+      ...replacement,
+      sampleStatus: 'CHÍNH THỨC',
+      sttMau: options.keepSttMau ? original.sttMau : replacement.sttMau,
+      assignedSurveyorId: options.transferSurveyor && original.assignedSurveyorId ? original.assignedSurveyorId : (replacement.assignedSurveyorId || ''),
+      assignedSurveyorName: options.transferSurveyor && original.assignedSurveyorName ? original.assignedSurveyorName : (replacement.assignedSurveyorName || ''),
+      note: (replacement.note ? `${replacement.note} | ` : '') + `[Thay thế cho hộ mẫu: ${original.householdHead} (Gốc: ${original.sttGoc}) - Lý do: ${reasonFull}]`,
+      updatedAt: timestamp
+    };
+
+    // 2. Cập nhật hộ mẫu cũ -> Đánh dấu ĐÃ THAY THẾ
+    const updatedOriginal: Household = {
+      ...original,
+      sampleStatus: 'ĐÃ THAY THẾ',
+      note: (original.note ? `${original.note} | ` : '') + `[Đã thay bằng hộ dự phòng: ${replacement.householdHead} (Gốc: ${replacement.sttGoc}) - Lý do: ${reasonFull}]`,
+      updatedAt: timestamp
+    };
+
+    setHouseholds(prev => {
+      const next = prev.map(h => {
+        if (h.id === original.id) return updatedOriginal;
+        if (h.id === replacement.id) return updatedReplacement;
+        return h;
+      });
+      try { localStorage.setItem('cached_households', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+
+    setHouseholdToReplace(null);
+
+    // Lưu vào Firebase
+    try {
+      await setDoc(doc(db, 'households', original.id), updatedOriginal);
+      await setDoc(doc(db, 'households', replacement.id), updatedReplacement);
+    } catch (err) {
+      console.warn("Firebase replace household warning:", err);
+    }
+
+    showNotification('success', `Đã thay thế thành công hộ mẫu "${original.householdHead}" bằng hộ dự phòng "${replacement.householdHead}" của địa bàn [${original.areaCode}].`);
+  };
+
+  // Thêm nhanh hộ dự phòng mới cho địa bàn
+  const handleAddNewReserveHousehold = async (newHhData: any): Promise<Household | null> => {
+    const newId = 'hh-' + newHhData.communeId + '-' + newHhData.areaCode + '-' + Date.now();
+    const newHousehold: Household = {
+      id: newId,
+      communeId: newHhData.communeId,
+      communeCode: newHhData.communeCode,
+      communeName: newHhData.communeName,
+      tkcsCode: newHhData.tkcsCode || '',
+      tkcsName: newHhData.tkcsName || '',
+      areaId: newHhData.areaId,
+      areaCode: newHhData.areaCode,
+      areaName: newHhData.areaName,
+      sttMau: 'DP',
+      sttGoc: 'DP-' + String(households.filter(h => h.areaCode === newHhData.areaCode).length + 1),
+      sampleStatus: 'DỰ PHÒNG',
+      householdHead: newHhData.householdHead,
+      address: newHhData.address,
+      phone: newHhData.phone || '',
+      membersCount: newHhData.membersCount || 4,
+      workingMembersCount: Math.max(1, (newHhData.membersCount || 4) - 1),
+      sectorCode: newHhData.sectorCode || 2,
+      sectorName: SECTOR_NAMES[newHhData.sectorCode as 1 | 2 | 3 | 4] || 'Công nghiệp xây dựng',
+      note: newHhData.note || '[Hộ dự phòng]',
+      surveyStatus: 'CHUA_NHAP',
+      assignedSurveyorId: '',
+      assignedSurveyorName: '',
+      questionnaire: createDefaultQuestionnaire()
+    };
+
+    setHouseholds(prev => {
+      const next = [...prev, newHousehold];
+      try { localStorage.setItem('cached_households', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+
+    try {
+      await setDoc(doc(db, 'households', newId), newHousehold);
+    } catch (err) {
+      console.warn("Firebase save warning", err);
+    }
+
+    showNotification('success', `Đã thêm hộ dự phòng "${newHousehold.householdHead}" cho địa bàn [${newHousehold.areaCode}].`);
+    return newHousehold;
+  };
+
   const handleLogin = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setLoginError('');
@@ -3079,14 +3254,22 @@ export default function App() {
     filteredHouseholds.forEach(h => {
       const inc = calculateHouseholdTotalIncome(h);
       const cObj = communes.find(c => c.id === h.communeId || c.communeCode === h.communeCode);
-      const aObj = areas.find(a => a.id === h.areaId || a.code === h.areaCode);
+      const aObj = areas.find(a => 
+        (h.areaId && a.id === h.areaId) || 
+        (h.areaCode && a.code === h.areaCode && (!h.communeId || !a.communeId || a.communeId === h.communeId)) ||
+        (h.areaCode && a.code === h.areaCode)
+      );
 
       const rTkcsCode = h.tkcsCode || cObj?.tkcsCode || formTkcsCode || '';
       const rTkcsName = h.tkcsName || cObj?.tkcsName || formTkcsName || '';
       const rCommuneCode = h.communeCode || cObj?.communeCode || formCommuneCode || '';
       const rCommuneName = h.communeName || cObj?.communeName || formCommuneName || '';
       const rAreaCode = h.areaCode || aObj?.code || '001';
-      const rAreaName = h.areaName || aObj?.name || 'Địa bàn';
+      const rAreaName = (h.areaName && h.areaName.trim() && h.areaName !== 'Địa bàn')
+        ? h.areaName.trim()
+        : (aObj?.name && aObj.name.trim() && aObj.name !== 'Địa bàn')
+        ? aObj.name.trim()
+        : ((h as any).sheetName || (h.areaCode ? `Địa bàn ${h.areaCode}` : '---'));
 
       wsData.push([
         h.sttMau,
@@ -3135,14 +3318,22 @@ export default function App() {
       const inc = calculateHouseholdTotalIncome(h);
       const perCapitaMonth = h.membersCount > 0 ? Math.round((inc.total / h.membersCount / 12) * 10) / 10 : 0;
       const cObj = communes.find(c => c.id === h.communeId || c.communeCode === h.communeCode);
-      const aObj = areas.find(a => a.id === h.areaId || a.code === h.areaCode);
+      const aObj = areas.find(a => 
+        (h.areaId && a.id === h.areaId) || 
+        (h.areaCode && a.code === h.areaCode && (!h.communeId || !a.communeId || a.communeId === h.communeId)) ||
+        (h.areaCode && a.code === h.areaCode)
+      );
 
       const rTkcsCode = h.tkcsCode || cObj?.tkcsCode || formTkcsCode || '';
       const rTkcsName = h.tkcsName || cObj?.tkcsName || formTkcsName || '';
       const rCommuneCode = h.communeCode || cObj?.communeCode || formCommuneCode || '';
       const rCommuneName = h.communeName || cObj?.communeName || formCommuneName || '';
       const rAreaCode = h.areaCode || aObj?.code || '001';
-      const rAreaName = h.areaName || aObj?.name || 'Địa bàn';
+      const rAreaName = (h.areaName && h.areaName.trim() && h.areaName !== 'Địa bàn')
+        ? h.areaName.trim()
+        : (aObj?.name && aObj.name.trim() && aObj.name !== 'Địa bàn')
+        ? aObj.name.trim()
+        : ((h as any).sheetName || (h.areaCode ? `Địa bàn ${h.areaCode}` : '---'));
 
       wsDataBk.push([
         h.sttMau,
@@ -3201,14 +3392,22 @@ export default function App() {
       const inc = calculateHouseholdTotalIncome(h);
       const perCapitaMonth = h.membersCount > 0 ? Math.round((inc.total / h.membersCount / 12) * 10) / 10 : 0;
       const cObj = communes.find(c => c.id === h.communeId || c.communeCode === h.communeCode);
-      const aObj = areas.find(a => a.id === h.areaId || a.code === h.areaCode);
+      const aObj = areas.find(a => 
+        (h.areaId && a.id === h.areaId) || 
+        (h.areaCode && a.code === h.areaCode && (!h.communeId || !a.communeId || a.communeId === h.communeId)) ||
+        (h.areaCode && a.code === h.areaCode)
+      );
 
       const rTkcsCode = h.tkcsCode || cObj?.tkcsCode || formTkcsCode || '';
       const rTkcsName = h.tkcsName || cObj?.tkcsName || formTkcsName || '';
       const rCommuneCode = h.communeCode || cObj?.communeCode || formCommuneCode || '';
       const rCommuneName = h.communeName || cObj?.communeName || formCommuneName || '';
       const rAreaCode = h.areaCode || aObj?.code || '001';
-      const rAreaName = h.areaName || aObj?.name || 'Địa bàn';
+      const rAreaName = (h.areaName && h.areaName.trim() && h.areaName !== 'Địa bàn')
+        ? h.areaName.trim()
+        : (aObj?.name && aObj.name.trim() && aObj.name !== 'Địa bàn')
+        ? aObj.name.trim()
+        : ((h as any).sheetName || (h.areaCode ? `Địa bàn ${h.areaCode}` : '---'));
 
       wsDataPhieu.push([
         idx + 1,
@@ -3442,8 +3641,17 @@ export default function App() {
                 const tkcsNameDisplay = h.tkcsName || currentCommune?.tkcsName || formTkcsName || '';
                 const communeCodeDisplay = h.communeCode || currentCommune?.communeCode || formCommuneCode || '';
                 const communeNameDisplay = h.communeName || currentCommune?.communeName || formCommuneName || '';
-                const areaCodeDisplay = h.areaCode || (areas.find(a => a.id === h.areaId)?.code) || '001';
-                const areaNameDisplay = h.areaName || (areas.find(a => a.id === h.areaId)?.name) || 'Địa bàn';
+                const matchedArea = areas.find(a => 
+                  (h.areaId && a.id === h.areaId) || 
+                  (h.areaCode && a.code === h.areaCode && (!h.communeId || !a.communeId || a.communeId === h.communeId)) ||
+                  (h.areaCode && a.code === h.areaCode)
+                );
+                const areaCodeDisplay = h.areaCode || matchedArea?.code || '001';
+                const areaNameDisplay = (h.areaName && h.areaName.trim() && h.areaName !== 'Địa bàn') 
+                  ? h.areaName.trim() 
+                  : (matchedArea?.name && matchedArea.name.trim() && matchedArea.name !== 'Địa bàn')
+                  ? matchedArea.name.trim()
+                  : ((h as any).sheetName || (h.areaCode ? `Địa bàn ${h.areaCode}` : '---'));
                 const isRowSelected = selectedHouseholdIds.includes(h.id);
                 const status = h.surveyStatus || 'CHUA_NHAP';
                 const isLocked = status === 'DA_DUYET' && currentUser?.role !== 'ADMIN';
@@ -3487,7 +3695,17 @@ export default function App() {
 
                     {/* Sample Status Column - Plain Text */}
                     <td className="border border-slate-300 p-2 text-center text-slate-800 font-medium">
-                      {h.sampleStatus || 'Chính thức'}
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                        (h.sampleStatus || '').toUpperCase().includes('DỰ PHÒNG') || (h.sampleStatus || '').toUpperCase().includes('DP')
+                          ? 'bg-purple-100 text-purple-900 border border-purple-300'
+                          : (h.sampleStatus || '').toUpperCase().includes('ĐÃ THAY')
+                          ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                          : (h.sampleStatus || '').toUpperCase().includes('THAY')
+                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                          : 'bg-sky-100 text-sky-900 border border-sky-300'
+                      }`}>
+                        {h.sampleStatus || 'Chính thức'}
+                      </span>
                     </td>
                     <td className="border border-slate-300 p-2 text-center text-slate-600">{h.sttGoc}</td>
                     <td className="border border-slate-300 p-2 font-semibold text-slate-900">{h.householdHead}</td>
@@ -3513,6 +3731,24 @@ export default function App() {
                           >
                             {isLocked ? <Eye className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
                             <span>{isLocked ? 'Xem phiếu' : 'Nhập tin phiếu'}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setHouseholdToReplace(h)}
+                            className={`px-2 py-1 text-white rounded font-bold flex items-center justify-center gap-1 cursor-pointer shadow-xs transition-colors text-xs ${
+                              (h.sampleStatus || '').toUpperCase().includes('ĐÃ THAY')
+                                ? 'bg-slate-600 hover:bg-slate-500'
+                                : 'bg-amber-600 hover:bg-amber-500 active:bg-amber-700'
+                            }`}
+                            title={
+                              (h.sampleStatus || '').toUpperCase().includes('ĐÃ THAY')
+                                ? 'Hộ mẫu này đã được thay thế (bấm để xem lại hoặc đổi)'
+                                : 'Thay thế hộ mẫu bằng hộ dự phòng của cùng địa bàn này'
+                            }
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                            <span>{(h.sampleStatus || '').toUpperCase().includes('ĐÃ THAY') ? 'Đã thay' : 'Thay hộ mẫu'}</span>
                           </button>
 
                           {currentUser?.role === 'ADMIN' && (
@@ -5475,10 +5711,14 @@ export default function App() {
                     <tbody>
                       {areas.map(a => {
                         const hhCount = a.householdCount || households.filter(h => h.areaId === a.id || h.areaCode === a.code).length;
+                        const aNameDisplay = (a.name && a.name.trim() && a.name !== 'Địa bàn')
+                          ? a.name.trim()
+                          : (households.find(h => (h.areaId === a.id || h.areaCode === a.code) && h.areaName && h.areaName !== 'Địa bàn')?.areaName)
+                          || `Địa bàn ${a.code}`;
                         return (
                           <tr key={a.id} className="hover:bg-sky-50 transition-colors">
                             <td className="border border-slate-300 p-2 text-center font-black text-emerald-800 bg-emerald-50/50">{a.code}</td>
-                            <td className="border border-slate-300 p-2 font-bold text-slate-900">{a.name}</td>
+                            <td className="border border-slate-300 p-2 font-bold text-slate-900">{aNameDisplay}</td>
                             <td className="border border-slate-300 p-2 text-center font-semibold text-slate-700">
                               {hhCount} hộ
                             </td>
@@ -6193,6 +6433,17 @@ export default function App() {
         onSave={handleSaveQuestionnaire}
         currentUser={currentUser}
         allSurveyors={surveyors}
+      />
+
+      {/* MODAL THAY THẾ HỘ MẪU ĐIỀU TRA BẰNG HỘ DỰ PHÒNG CÙNG ĐỊA BÀN */}
+      <ReplaceHouseholdModal
+        isOpen={!!householdToReplace}
+        onClose={() => setHouseholdToReplace(null)}
+        householdToReplace={householdToReplace}
+        allHouseholds={households}
+        areas={areas}
+        onConfirmReplacement={handleConfirmReplacement}
+        onAddNewReserveHousehold={handleAddNewReserveHousehold}
       />
 
       {/* SỔ TAY TRA CỨU DANH MỤC GLOBAL MODAL */}
