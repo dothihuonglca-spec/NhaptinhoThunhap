@@ -186,7 +186,7 @@ export const IncomeMacroControl: React.FC<IncomeMacroControlProps> = ({
         // Bình quân đầu người
         perCapitaYear,
         perCapitaMonth,
-        targetMonthBenchmark: 7498,
+        targetMonthBenchmark: perCapitaMonth,
         // Tổng thu nhập địa phương
         totalLocalIncomeYear,
         totalLocalIncomeMonth,
@@ -215,7 +215,7 @@ export const IncomeMacroControl: React.FC<IncomeMacroControlProps> = ({
       totalMonthFund,
       avgYear,
       avgMonth,
-      targetMonth: 7498,
+      targetMonth: avgMonth,
       totalSurveyedHHs,
       totalSampleHHs,
       surveyedCommunesCount: macroRows.filter(r => r.hasSurveyData).length

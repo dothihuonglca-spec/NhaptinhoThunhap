@@ -3937,7 +3937,7 @@ export default function App() {
             <span className={activeTab === 'catalog' ? 'text-teal-950 font-black' : 'text-white'}>6. Danh mục tra cứu</span>
           </button>
 
-          {currentUser.role === 'ADMIN' && (
+          {(currentUser.role === 'ADMIN' || currentUser.role === 'SUPERVISOR') && (
             <button 
               onClick={() => setActiveTab('surveyors')}
               className={`px-3.5 py-2 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap rounded-t-md font-bold ${

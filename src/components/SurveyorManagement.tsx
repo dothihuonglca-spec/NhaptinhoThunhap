@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Users, UserPlus, Shield, ShieldCheck, CheckCircle2, Lock, 
   Unlock, Edit3, Trash2, MapPin, Check, AlertCircle, Save, 
@@ -44,7 +44,7 @@ interface SurveyorManagementProps {
   areas: SurveyArea[];
   communes?: CommuneItem[];
   households: Household[];
-  currentUser: Surveyor | null;
+  currentUser: Surveyor;
   onSaveSurveyor: (surveyor: Surveyor) => Promise<void>;
   onDeleteSurveyor: (id: string) => Promise<void>;
   onSaveDepartment: (department: Department) => Promise<void>;
@@ -71,7 +71,7 @@ export default function SurveyorManagement({
   onSelectActiveUser,
   showNotification
 }: SurveyorManagementProps) {
-  const [subTab, setSubTab] = useState<'departments' | 'surveyors'>('departments');
+  const [subTab, setSubTab] = useState<'departments' | 'surveyors'>(currentUser.role === 'SUPERVISOR' ? 'surveyors' : 'departments');
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
   const [deptFilter, setDeptFilter] = useState<string>('ALL');
@@ -85,7 +85,7 @@ export default function SurveyorManagement({
   const [isDeptModalOpen, setIsDeptModalOpen] = useState(false);
 
   // Quick assignment state
-  const [quickAssignCommuneId, setQuickAssignCommuneId] = useState<string>('ALL');
+  const [quickAssignCommuneId, setQuickAssignCommuneId] = useState<string>(communes[0]?.id || 'ALL');
   const [surveyorCommuneFilter, setSurveyorCommuneFilter] = useState<string>('ALL');
   const [assignSurveyorId, setAssignSurveyorId] = useState<string>(surveyors[0]?.id || '');
   const [assignAreaCode, setAssignAreaCode] = useState<string>(areas[0]?.code || '');
@@ -109,7 +109,7 @@ export default function SurveyorManagement({
   const [formAllAreas, setFormAllAreas] = useState<boolean>(false);
   const [formAssignedAreas, setFormAssignedAreas] = useState<string[]>([]);
   // Commune filter when assigning areas in Surveyor Modal
-  const [modalAreaCommuneFilter, setModalAreaCommuneFilter] = useState<string>('ALL');
+  const [modalAreaCommuneFilter, setModalAreaCommuneFilter] = useState<string>(communes[0]?.id || 'ALL');
   // Supervisor commune assignment state
   const [formAllCommunes, setFormAllCommunes] = useState<boolean>(false);
   const [formAssignedCommunes, setFormAssignedCommunes] = useState<string[]>([]);
@@ -126,7 +126,7 @@ export default function SurveyorManagement({
   const [deptFormLeader, setDeptFormLeader] = useState('');
   const [deptFormPhone, setDeptFormPhone] = useState('');
   const [deptFormAreas, setDeptFormAreas] = useState<string[]>([]);
-  const [deptModalAreaCommuneFilter, setDeptModalAreaCommuneFilter] = useState<string>('ALL');
+  const [deptModalAreaCommuneFilter, setDeptModalAreaCommuneFilter] = useState<string>(communes[0]?.id || 'ALL');
   const [isDeptSubmitting, setIsDeptSubmitting] = useState(false);
 
   // Deletion modals
@@ -140,6 +140,24 @@ export default function SurveyorManagement({
   const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [showResetPasswordText, setShowResetPasswordText] = useState(false);
 
+  useEffect(() => {
+    if (communes.length > 0) {
+      if (quickAssignCommuneId === 'ALL') {
+        setQuickAssignCommuneId(communes[0].id);
+        const matchingArs = areas.filter(a => a.communeId === communes[0].id || (a as any).communeCode === communes[0].communeCode);
+        if (matchingArs.length > 0) {
+          setAssignAreaCode(matchingArs[0].code);
+        }
+      }
+      if (modalAreaCommuneFilter === 'ALL') {
+        setModalAreaCommuneFilter(communes[0].id);
+      }
+      if (deptModalAreaCommuneFilter === 'ALL') {
+        setDeptModalAreaCommuneFilter(communes[0].id);
+      }
+    }
+  }, [communes, areas]);
+
   const openAddModal = (defaultDeptId?: string) => {
     const count = surveyors.length + 1;
     const nextCode = `DTV${count < 10 ? '0' + count : count}`;
@@ -151,11 +169,11 @@ export default function SurveyorManagement({
     setFormPassword('123456');
     setShowPasswordInForm(false);
     setFormRole('SURVEYOR');
-    setFormDeptId(defaultDeptId || (departments[0]?.id || 'pb_01'));
+    setFormDeptId(currentUser.role === 'SUPERVISOR' ? (currentUser.departmentId || 'pb_01') : (defaultDeptId || (departments[0]?.id || 'pb_01')));
     setFormPosition('Cán bộ điều tra viên');
     setFormAllAreas(false);
     setFormAssignedAreas(areas.length > 0 ? [areas[0].code] : []);
-    setModalAreaCommuneFilter('ALL');
+    setModalAreaCommuneFilter(communes[0]?.id || 'ALL');
     setFormAllCommunes(false);
     setFormAssignedCommunes([]);
     setSupervisorCommuneSearch('');
@@ -178,7 +196,7 @@ export default function SurveyorManagement({
     setFormPosition(s.position || '');
     setFormAllAreas(s.assignedAreas.includes('ALL'));
     setFormAssignedAreas(s.assignedAreas.filter(a => a !== 'ALL'));
-    setModalAreaCommuneFilter('ALL');
+    setModalAreaCommuneFilter(communes[0]?.id || 'ALL');
     setFormAllCommunes(Boolean(s.assignedCommunes?.includes('ALL')));
     setFormAssignedCommunes(s.assignedCommunes ? s.assignedCommunes.filter(c => c !== 'ALL') : []);
     setSupervisorCommuneSearch('');
@@ -197,7 +215,7 @@ export default function SurveyorManagement({
     setDeptFormLeader('');
     setDeptFormPhone('');
     setDeptFormAreas([]);
-    setDeptModalAreaCommuneFilter('ALL');
+    setDeptModalAreaCommuneFilter(communes[0]?.id || 'ALL');
     setIsDeptModalOpen(true);
   };
 
@@ -209,7 +227,7 @@ export default function SurveyorManagement({
     setDeptFormLeader(d.leaderName || '');
     setDeptFormPhone(d.leaderPhone || '');
     setDeptFormAreas(d.assignedAreaCodes || []);
-    setDeptModalAreaCommuneFilter('ALL');
+    setDeptModalAreaCommuneFilter(communes[0]?.id || 'ALL');
     setIsDeptModalOpen(true);
   };
 
@@ -360,6 +378,11 @@ export default function SurveyorManagement({
   const approvedHouseholds = households.filter(h => h.surveyStatus === 'DA_DUYET').length;
 
   const filteredSurveyors = surveyors.filter(s => {
+    // Giám sát viên chỉ được thấy và quản lý cán bộ thuộc phòng ban mình phụ trách
+    if (currentUser.role === 'SUPERVISOR') {
+      if (s.departmentId !== currentUser.departmentId) return false;
+    }
+
     if (roleFilter !== 'ALL' && s.role !== roleFilter) return false;
     if (deptFilter !== 'ALL' && s.departmentId !== deptFilter && s.department !== deptFilter) return false;
     if (surveyorCommuneFilter !== 'ALL') {
@@ -419,44 +442,37 @@ export default function SurveyorManagement({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Sub-tab switcher */}
-          <div className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-1">
-            <button
-              type="button"
-              onClick={() => setSubTab('departments')}
-              className={`px-3.5 py-1.5 rounded-md font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
-                subTab === 'departments' 
-                  ? 'bg-sky-800 text-white shadow-xs' 
-                  : 'text-slate-700 hover:text-slate-900'
-              }`}
-            >
-              <Building2 className="w-4 h-4" />
-              <span>5 Phòng Ban ({departments.length})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setSubTab('surveyors')}
-              className={`px-3.5 py-1.5 rounded-md font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
-                subTab === 'surveyors' 
-                  ? 'bg-sky-800 text-white shadow-xs' 
-                  : 'text-slate-700 hover:text-slate-900'
-              }`}
-            >
-              <Users className="w-4 h-4" />
-              <span>Tài khoản ĐTV ({surveyors.length})</span>
-            </button>
-          </div>
+          {/* Sub-tab switcher - Only visible to ADMIN */}
+          {currentUser.role === 'ADMIN' ? (
+            <div className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-1">
+              <button
+                type="button"
+                onClick={() => setSubTab('departments')}
+                className={`px-3.5 py-1.5 rounded-md font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                  subTab === 'departments' 
+                    ? 'bg-sky-800 text-white shadow-xs' 
+                    : 'text-slate-700 hover:text-slate-900'
+                }`}
+              >
+                <Building2 className="w-4 h-4" />
+                <span>5 Phòng Ban ({departments.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubTab('surveyors')}
+                className={`px-3.5 py-1.5 rounded-md font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                  subTab === 'surveyors' 
+                    ? 'bg-sky-800 text-white shadow-xs' 
+                    : 'text-slate-700 hover:text-slate-900'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                <span>Tài khoản ĐTV ({surveyors.length})</span>
+              </button>
+            </div>
+          ) : null}
 
-          {subTab === 'departments' ? (
-            <button
-              type="button"
-              onClick={openAddDeptModal}
-              className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors"
-            >
-              <Building2 className="w-4 h-4" />
-              <span>+ Thêm Phòng Ban</span>
-            </button>
-          ) : (
+          {currentUser.role === 'SUPERVISOR' ? (
             <button
               type="button"
               onClick={() => openAddModal()}
@@ -465,6 +481,26 @@ export default function SurveyorManagement({
               <UserPlus className="w-4 h-4" />
               <span>+ Cấp Tài Khoản Mới</span>
             </button>
+          ) : (
+            subTab === 'departments' ? (
+              <button
+                type="button"
+                onClick={openAddDeptModal}
+                className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors"
+              >
+                <Building2 className="w-4 h-4" />
+                <span>+ Thêm Phòng Ban</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => openAddModal()}
+                className="px-3.5 py-2 bg-sky-800 hover:bg-sky-700 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>+ Cấp Tài Khoản Mới</span>
+              </button>
+            )
           )}
         </div>
       </div>
@@ -1010,14 +1046,16 @@ export default function SurveyorManagement({
                               <Edit3 className="w-3.5 h-3.5" />
                             </button>
 
-                            <button
-                              type="button"
-                              onClick={() => setSurveyorToDelete(s)}
-                              className="p-1.5 text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 rounded border border-rose-200 cursor-pointer"
-                              title="Xóa tài khoản này"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {currentUser.role === 'ADMIN' && (
+                              <button
+                                type="button"
+                                onClick={() => setSurveyorToDelete(s)}
+                                className="p-1.5 text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 rounded border border-rose-200 cursor-pointer"
+                                title="Xóa tài khoản này"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1092,7 +1130,8 @@ export default function SurveyorManagement({
                   <select
                     value={formDeptId}
                     onChange={e => setFormDeptId(e.target.value)}
-                    className="w-full border border-slate-300 rounded p-2 font-bold text-slate-900"
+                    disabled={currentUser.role === 'SUPERVISOR'}
+                    className="w-full border border-slate-300 rounded p-2 font-bold text-slate-900 bg-slate-50 disabled:opacity-85"
                   >
                     {departments.map(d => (
                       <option key={d.id} value={d.id}>
@@ -1194,27 +1233,36 @@ export default function SurveyorManagement({
               {/* Role selection */}
               <div>
                 <label className="block font-bold text-slate-800 mb-1">Vai trò & Phân quyền hệ thống</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['SURVEYOR', 'ADMIN', 'SUPERVISOR'] as UserRole[]).map(role => {
-                    const r = ROLE_LABELS[role];
-                    const isSelected = formRole === role;
-                    return (
-                      <button
-                        type="button"
-                        key={role}
-                        onClick={() => setFormRole(role)}
-                        className={`p-2 rounded-lg border text-left cursor-pointer transition-all flex flex-col gap-1 ${
-                          isSelected 
-                            ? 'border-sky-700 bg-sky-50 ring-1 ring-sky-700' 
-                            : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
-                        }`}
-                      >
-                        <span className="font-extrabold text-xs text-slate-900">{r.label}</span>
-                        <span className="text-[10px] text-slate-600 leading-tight">{r.desc}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+                {currentUser.role === 'SUPERVISOR' ? (
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 leading-tight">
+                    ✓ Vai trò: <span className="text-sky-800 font-extrabold">{ROLE_LABELS['SURVEYOR'].label}</span>
+                    <p className="font-normal text-[11px] text-slate-500 mt-1 leading-normal">
+                      Cán bộ Giám sát viên chỉ được quyền cấp tài khoản Điều tra viên thuộc phòng ban phụ trách.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['SURVEYOR', 'ADMIN', 'SUPERVISOR'] as UserRole[]).map(role => {
+                      const r = ROLE_LABELS[role];
+                      const isSelected = formRole === role;
+                      return (
+                        <button
+                          type="button"
+                          key={role}
+                          onClick={() => setFormRole(role)}
+                          className={`p-2 rounded-lg border text-left cursor-pointer transition-all flex flex-col gap-1 ${
+                            isSelected 
+                              ? 'border-sky-700 bg-sky-50 ring-1 ring-sky-700' 
+                              : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                          }`}
+                        >
+                          <span className="font-extrabold text-xs text-slate-900">{r.label}</span>
+                          <span className="text-[10px] text-slate-600 leading-tight">{r.desc}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Area & Commune assignment based on Role */}
@@ -1353,7 +1401,6 @@ export default function SurveyorManagement({
                             onChange={e => setModalAreaCommuneFilter(e.target.value)}
                             className="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs font-bold text-slate-800 focus:outline-none"
                           >
-                            <option value="ALL">-- Tất cả các xã ({communes.length} xã) --</option>
                             {communes.map(c => (
                               <option key={c.id} value={c.id}>
                                 [{c.communeCode}] {c.communeName}
@@ -1363,44 +1410,32 @@ export default function SurveyorManagement({
                         </div>
 
                         <div className="flex items-center gap-2 text-xs shrink-0">
-                          {modalAreaCommuneFilter !== 'ALL' ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const commAreas = areas
-                                    .filter(a => a.communeId === modalAreaCommuneFilter || (a as any).communeCode === modalAreaCommuneFilter)
-                                    .map(a => a.code);
-                                  const combined = Array.from(new Set([...formAssignedAreas, ...commAreas]));
-                                  setFormAssignedAreas(combined);
-                                }}
-                                className="text-[11px] text-sky-700 hover:underline font-bold"
-                              >
-                                Chọn tất cả ĐB xã này
-                              </button>
-                              <span className="text-slate-300">|</span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const commAreas = areas
-                                    .filter(a => a.communeId === modalAreaCommuneFilter || (a as any).communeCode === modalAreaCommuneFilter)
-                                    .map(a => a.code);
-                                  setFormAssignedAreas(formAssignedAreas.filter(c => !commAreas.includes(c)));
-                                }}
-                                className="text-[11px] text-rose-700 hover:underline font-bold"
-                              >
-                                Bỏ chọn ĐB xã này
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setFormAssignedAreas([])}
-                              className="text-[11px] text-rose-700 hover:underline font-bold"
-                            >
-                              Bỏ chọn tất cả
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const commAreas = areas
+                                .filter(a => a.communeId === modalAreaCommuneFilter || (a as any).communeCode === modalAreaCommuneFilter)
+                                .map(a => a.code);
+                              const combined = Array.from(new Set([...formAssignedAreas, ...commAreas]));
+                              setFormAssignedAreas(combined);
+                            }}
+                            className="text-[11px] text-sky-700 hover:underline font-bold"
+                          >
+                            Chọn tất cả ĐB xã này
+                          </button>
+                          <span className="text-slate-300">|</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const commAreas = areas
+                                .filter(a => a.communeId === modalAreaCommuneFilter || (a as any).communeCode === modalAreaCommuneFilter)
+                                .map(a => a.code);
+                              setFormAssignedAreas(formAssignedAreas.filter(c => !commAreas.includes(c)));
+                            }}
+                            className="text-[11px] text-rose-700 hover:underline font-bold"
+                          >
+                            Bỏ chọn ĐB xã này
+                          </button>
                         </div>
                       </div>
 
@@ -1572,33 +1607,82 @@ export default function SurveyorManagement({
               </div>
 
               {/* Area assignment for Department */}
-              <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
-                <label className="block font-bold text-slate-900 mb-1.5">
-                  Phân công các Địa bàn giao cho Phòng ban này phụ trách ({deptFormAreas.length} địa bàn):
+              <div className="border border-slate-200 rounded-lg p-3 bg-slate-50 flex flex-col gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-1 border-b border-slate-200">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-slate-700 text-[11px]">Lọc theo Xã:</span>
+                    <select
+                      value={deptModalAreaCommuneFilter}
+                      onChange={e => setDeptModalAreaCommuneFilter(e.target.value)}
+                      className="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs font-bold text-slate-800 focus:outline-none"
+                    >
+                      {communes.map(c => (
+                        <option key={c.id} value={c.id}>
+                          [{c.communeCode}] {c.communeName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-xs shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const commAreas = areas
+                          .filter(a => a.communeId === deptModalAreaCommuneFilter || (a as any).communeCode === deptModalAreaCommuneFilter)
+                          .map(a => a.code);
+                        const combined = Array.from(new Set([...deptFormAreas, ...commAreas]));
+                        setDeptFormAreas(combined);
+                      }}
+                      className="text-[11px] text-sky-700 hover:underline font-bold"
+                    >
+                      Chọn tất cả ĐB xã này
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const commAreas = areas
+                          .filter(a => a.communeId === deptModalAreaCommuneFilter || (a as any).communeCode === deptModalAreaCommuneFilter)
+                          .map(a => a.code);
+                        setDeptFormAreas(deptFormAreas.filter(c => !commAreas.includes(c)));
+                      }}
+                      className="text-[11px] text-rose-700 hover:underline font-bold"
+                    >
+                      Bỏ chọn ĐB xã này
+                    </button>
+                  </div>
+                </div>
+
+                <label className="block font-bold text-slate-900 text-[11px]">
+                  Danh sách địa bàn giao cho Phòng ban phụ trách ({deptFormAreas.length} địa bàn):
                 </label>
+
                 <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto p-1 border border-slate-200 bg-white rounded">
-                  {areas.map(area => {
-                    const isChecked = deptFormAreas.includes(area.code);
-                    return (
-                      <label
-                        key={area.id}
-                        className={`flex items-center gap-2 p-1.5 rounded cursor-pointer text-[11px] border transition-colors ${
-                          isChecked ? 'bg-sky-50 border-sky-300 font-bold text-sky-950' : 'border-transparent hover:bg-slate-50'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={() => handleToggleDeptAreaCheckbox(area.code)}
-                          className="rounded text-sky-700"
-                        />
-                        <span>ĐB {area.code} - {area.name}</span>
-                      </label>
-                    );
-                  })}
-                  {areas.length === 0 && (
-                    <div className="col-span-2 text-center py-2 text-slate-400 italic">
-                      Chưa có địa bàn trong hệ thống.
+                  {areas
+                    .filter(a => a.communeId === deptModalAreaCommuneFilter || (a as any).communeCode === deptModalAreaCommuneFilter)
+                    .map(area => {
+                      const isChecked = deptFormAreas.includes(area.code);
+                      return (
+                        <label
+                          key={area.id}
+                          className={`flex items-center gap-2 p-1.5 rounded cursor-pointer text-[11px] border transition-colors ${
+                            isChecked ? 'bg-sky-50 border-sky-300 font-bold text-sky-950' : 'border-transparent hover:bg-slate-50'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleDeptAreaCheckbox(area.code)}
+                            className="rounded text-sky-700"
+                          />
+                          <span>ĐB {area.code} - {area.name}</span>
+                        </label>
+                      );
+                    })}
+                  {areas.filter(a => a.communeId === deptModalAreaCommuneFilter || (a as any).communeCode === deptModalAreaCommuneFilter).length === 0 && (
+                    <div className="col-span-2 text-center py-4 text-slate-400 italic">
+                      Xã này chưa có địa bàn nào được tải lên.
                     </div>
                   )}
                 </div>
