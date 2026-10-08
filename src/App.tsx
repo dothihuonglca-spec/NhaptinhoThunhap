@@ -179,6 +179,7 @@ export default function App() {
   const [tnhScopeMode, setTnhScopeMode] = useState<'COMMUNE_QUICK' | 'COMMUNE_SECTOR' | 'TKCS_SECTOR' | 'PROVINCE_SECTOR'>('COMMUNE_QUICK');
   const [tnhSelectedCommuneId, setTnhSelectedCommuneId] = useState<string>('ALL');
   const [tnhSelectedTkcs, setTnhSelectedTkcs] = useState<string>('ALL');
+  const [tnhSurveyorOnlyMine, setTnhSurveyorOnlyMine] = useState<boolean>(true);
 
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadProgressText, setUploadProgressText] = useState<string>('');
@@ -2052,29 +2053,37 @@ export default function App() {
 
   // Danh sách xã thuộc phạm vi Tổng hợp nhanh đang xem
   const tnhScopeCommunes = useMemo(() => {
+    let result = communes;
     if (tnhScopeMode === 'COMMUNE_QUICK' || tnhScopeMode === 'COMMUNE_SECTOR') {
       if (tnhSelectedCommuneId !== 'ALL') {
         const found = communes.find(c => c.id === tnhSelectedCommuneId || c.communeCode === tnhSelectedCommuneId);
-        return found ? [found] : communes;
-      }
-      if (selectedCommuneId !== 'ALL') {
+        result = found ? [found] : communes;
+      } else if (selectedCommuneId !== 'ALL') {
         const found = communes.find(c => c.id === selectedCommuneId || c.communeCode === selectedCommuneId);
-        return found ? [found] : communes;
+        result = found ? [found] : communes;
       }
-      return communes;
-    }
-    if (tnhScopeMode === 'TKCS_SECTOR') {
+    } else if (tnhScopeMode === 'TKCS_SECTOR') {
       if (tnhSelectedTkcs !== 'ALL') {
-        return communes.filter(c => c.tkcsCode === tnhSelectedTkcs);
+        result = communes.filter(c => c.tkcsCode === tnhSelectedTkcs);
+      } else if (selectedTkcs !== 'ALL') {
+        result = communes.filter(c => c.tkcsCode === selectedTkcs);
       }
-      if (selectedTkcs !== 'ALL') {
-        return communes.filter(c => c.tkcsCode === selectedTkcs);
-      }
-      return communes;
     }
-    // PROVINCE_SECTOR
-    return communes;
-  }, [communes, tnhScopeMode, tnhSelectedCommuneId, selectedCommuneId, tnhSelectedTkcs, selectedTkcs]);
+
+    // Nếu người nhập tin (SURVEYOR) đang bật chế độ chỉ xem xã/địa bàn phụ trách
+    if (currentUser?.role === 'SURVEYOR' && tnhSurveyorOnlyMine) {
+      const myAssignedCommuneCodes = new Set(
+        households
+          .filter(h => h.assignedSurveyorId === currentUser.id || currentUser.assignedAreas.includes('ALL') || currentUser.assignedAreas.includes(h.areaCode))
+          .map(h => h.communeCode)
+      );
+      if (myAssignedCommuneCodes.size > 0) {
+        result = result.filter(c => myAssignedCommuneCodes.has(c.communeCode));
+      }
+    }
+
+    return result;
+  }, [communes, households, tnhScopeMode, tnhSelectedCommuneId, selectedCommuneId, tnhSelectedTkcs, selectedTkcs, currentUser, tnhSurveyorOnlyMine]);
 
   // Hộ gia đình thuộc phạm vi Tổng hợp nhanh đang xem
   const tnhScopeHouseholds = useMemo(() => {
@@ -2100,8 +2109,17 @@ export default function App() {
       list = list.filter(h => h.areaId === selectedAreaId || h.areaCode === selectedAreaId);
     }
 
+    // Nếu người nhập tin (SURVEYOR) đang bật chỉ xem địa bàn & xã phụ trách
+    if (currentUser?.role === 'SURVEYOR' && tnhSurveyorOnlyMine) {
+      list = list.filter(h => 
+        h.assignedSurveyorId === currentUser.id || 
+        currentUser.assignedAreas.includes('ALL') || 
+        currentUser.assignedAreas.includes(h.areaCode)
+      );
+    }
+
     return list;
-  }, [households, communes, tnhScopeMode, tnhSelectedCommuneId, selectedCommuneId, tnhSelectedTkcs, selectedTkcs, selectedAreaId]);
+  }, [households, communes, tnhScopeMode, tnhSelectedCommuneId, selectedCommuneId, tnhSelectedTkcs, selectedTkcs, selectedAreaId, currentUser, tnhSurveyorOnlyMine]);
 
   // Tính toán Tổng hợp nhanh kết nối chuẩn xác Danh mục Xã / TKCS và Phiếu điều tra thực tế
   const tnhSummary = useMemo(() => {
@@ -2317,6 +2335,14 @@ export default function App() {
 
   const filteredCommunesTnhOverview = useMemo(() => {
     return communesTnhOverview.filter(item => {
+      // Khi là người nhập tin (SURVEYOR) và bật chỉ xem xã phụ trách
+      if (currentUser?.role === 'SURVEYOR' && tnhSurveyorOnlyMine) {
+        const hasMyHouseholds = households.some(h => 
+          (h.communeId === item.commune.id || h.communeCode === item.commune.communeCode) &&
+          (h.assignedSurveyorId === currentUser.id || currentUser.assignedAreas.includes('ALL') || currentUser.assignedAreas.includes(h.areaCode))
+        );
+        if (!hasMyHouseholds) return false;
+      }
       if (selectedTkcs !== 'ALL' && item.commune.tkcsCode !== selectedTkcs) return false;
       if (selectedCommuneId !== 'ALL' && item.commune.id !== selectedCommuneId && item.commune.communeCode !== selectedCommuneId) return false;
       if (searchKeyword.trim()) {
@@ -2328,7 +2354,84 @@ export default function App() {
       }
       return true;
     });
-  }, [communesTnhOverview, selectedTkcs, selectedCommuneId, searchKeyword]);
+  }, [communesTnhOverview, selectedTkcs, selectedCommuneId, searchKeyword, currentUser, tnhSurveyorOnlyMine, households]);
+
+  // Tổng hợp chi tiết theo từng địa bàn và xã mà cán bộ / người nhập tin phụ trách
+  const surveyorAssignedAreasSummary = useMemo(() => {
+    if (!currentUser) return [];
+    const myHHs = households.filter(h => 
+      currentUser.role === 'ADMIN' ? true :
+      (h.assignedSurveyorId === currentUser.id || 
+       currentUser.assignedAreas.includes('ALL') || 
+       currentUser.assignedAreas.includes(h.areaCode))
+    );
+
+    const map = new Map<string, {
+      key: string;
+      communeId: string;
+      communeCode: string;
+      communeName: string;
+      tkcsCode: string;
+      tkcsName: string;
+      areaId: string;
+      areaCode: string;
+      areaName: string;
+      totalAssigned: number;
+      surveyedCount: number;
+      remainingCount: number;
+      totalMembers: number;
+      totalIncome: number;
+      perCapitaMonth: number;
+      percentDone: number;
+    }>();
+
+    myHHs.forEach(h => {
+      const commCode = h.communeCode || '---';
+      const aCode = h.areaCode || '001';
+      const key = `${commCode}_${aCode}`;
+      const commObj = communes.find(c => c.communeCode === commCode || c.id === h.communeId);
+      const areaObj = areas.find(a => a.id === h.areaId || a.code === aCode);
+
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          communeId: h.communeId || commObj?.id || '',
+          communeCode: commCode,
+          communeName: h.communeName || commObj?.communeName || '---',
+          tkcsCode: h.tkcsCode || commObj?.tkcsCode || '---',
+          tkcsName: h.tkcsName || commObj?.tkcsName || '---',
+          areaId: h.areaId || areaObj?.id || '',
+          areaCode: aCode,
+          areaName: h.areaName || areaObj?.name || `Địa bàn ${aCode}`,
+          totalAssigned: 0,
+          surveyedCount: 0,
+          remainingCount: 0,
+          totalMembers: 0,
+          totalIncome: 0,
+          perCapitaMonth: 0,
+          percentDone: 0
+        });
+      }
+
+      const g = map.get(key)!;
+      g.totalAssigned += 1;
+      if (isHouseholdSurveyed(h)) {
+        g.surveyedCount += 1;
+        g.totalMembers += (Number(h.membersCount) || 1);
+        g.totalIncome += calculateHouseholdTotalIncome(h).total;
+      }
+    });
+
+    const res = Array.from(map.values()).map(g => {
+      g.remainingCount = Math.max(0, g.totalAssigned - g.surveyedCount);
+      g.percentDone = g.totalAssigned > 0 ? Math.round((g.surveyedCount / g.totalAssigned) * 100) : 0;
+      g.perCapitaMonth = g.totalMembers > 0 ? Math.round(g.totalIncome / g.totalMembers / 12) : 0;
+      return g;
+    });
+
+    res.sort((a, b) => a.communeCode.localeCompare(b.communeCode) || a.areaCode.localeCompare(b.areaCode));
+    return res;
+  }, [households, communes, areas, currentUser]);
 
   const handleSaveQuestionnaire = async (updatedHousehold: any) => {
     if (!updatedHousehold) return;
@@ -3167,24 +3270,28 @@ export default function App() {
 
     return (
       <div className="flex flex-col w-full">
-        {/* Thanh tóm tắt kết quả tổng hợp nhanh cho danh sách đang xem */}
-        <div className="bg-emerald-50 border-t border-x border-emerald-300 px-3.5 py-2 rounded-t flex flex-wrap items-center justify-between gap-2 text-xs">
-          <div className="flex flex-wrap items-center gap-3 text-emerald-950 font-medium">
-            <span className="font-bold flex items-center gap-1 text-emerald-900">
-              <BarChart3 className="w-4 h-4 text-emerald-700" />
+        {/* Thanh tiêu đề kết hợp tóm tắt kết quả tổng hợp nhanh */}
+        <div className="bg-[#f0f9fa] border-t border-x border-slate-300 px-3.5 py-2 rounded-t flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2.5 text-slate-800 font-medium">
+            <span className="font-extrabold flex items-center gap-1.5 text-teal-950 pr-2.5 border-r border-slate-300">
+              <FileText className="w-4 h-4 text-teal-700" />
+              <span>Danh sách Bảng kê Hộ mẫu</span>
+            </span>
+            <span className="font-bold flex items-center gap-1 text-teal-900">
+              <BarChart3 className="w-3.5 h-3.5 text-teal-700" />
               <span>Tổng hợp (Phạm vi đang lọc):</span>
             </span>
-            <span>Tổng số: <strong>{totalItems} hộ</strong></span>
-            <span>|</span>
-            <span>Đã điều tra: <strong className="text-emerald-800 font-bold">{surveyedCount} hộ</strong></span>
-            <span>|</span>
-            <span>Tổng nhân khẩu: <strong className="text-rose-900 font-black">{surveyedMembers} người</strong></span>
-            <span>|</span>
-            <span>Tổng thu nhập: <strong className="text-emerald-900 font-bold">{surveyedIncome.toLocaleString()} (1.000 đ)</strong></span>
+            <span>Tổng số: <strong className="text-slate-900 font-bold">{totalItems} hộ</strong></span>
+            <span className="text-slate-300">|</span>
+            <span>Đã điều tra: <strong className="text-teal-800 font-bold">{surveyedCount} hộ</strong></span>
+            <span className="text-slate-300">|</span>
+            <span>Tổng nhân khẩu: <strong className="text-slate-900 font-bold">{surveyedMembers} người</strong></span>
+            <span className="text-slate-300">|</span>
+            <span>Tổng thu nhập: <strong className="text-teal-900 font-bold">{surveyedIncome.toLocaleString()} (1.000 đ)</strong></span>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="bg-emerald-700 text-white px-2.5 py-1 rounded font-bold text-xs shadow-2xs">
+            <span className="font-extrabold text-teal-950 text-xs">
               TNBQ: {perCapitaFilteredMonth > 0 ? `${perCapitaFilteredMonth.toLocaleString()} đ/người/tháng` : '0 đ'} 
             </span>
           </div>
@@ -3199,7 +3306,7 @@ export default function App() {
                   <th className="border border-[#047484] px-2 py-2.5 w-10 text-center bg-[#058da0] text-white font-semibold sticky top-0">
                     <input 
                       type="checkbox" 
-                      checked={isAllSelected}
+                      checked={isAllSelected} 
                       onChange={handleToggleSelectAll}
                       className="rounded text-teal-600 w-4 h-4 cursor-pointer"
                       title="Chọn tất cả các dòng trên trang này"
@@ -3243,73 +3350,52 @@ export default function App() {
                 return (
                   <tr 
                     key={h.id} 
-                    className={`hover:bg-sky-50 transition-colors ${isRowSelected ? 'bg-sky-100/70 font-semibold' : 'odd:bg-slate-50/40'}`}
+                    className={`transition-colors ${isRowSelected ? 'bg-sky-100 font-semibold' : 'odd:bg-white even:bg-[#f2fafb] hover:bg-[#e6f6f8]'}`}
                   >
                     {showEntryButton && (
                       <td className="border border-slate-300 p-2 text-center">
                         <input 
                           type="checkbox" 
-                          checked={isRowSelected}
+                          checked={isRowSelected} 
                           onChange={() => handleToggleSelectRow(h.id)}
                           className="rounded text-sky-600 w-4 h-4 cursor-pointer"
                         />
                       </td>
                     )}
-                    <td className="border border-slate-300 p-2 text-center font-bold text-slate-900">{h.sttMau}</td>
-                    <td className="border border-slate-300 p-2 text-center font-bold text-amber-900 bg-amber-50/50">{tkcsCodeDisplay}</td>
-                    <td className="border border-slate-300 p-2 font-medium text-slate-800 bg-amber-50/30">{tkcsNameDisplay}</td>
-                    <td className="border border-slate-300 p-2 text-center font-bold text-sky-900 bg-sky-50/50">{communeCodeDisplay}</td>
-                    <td className="border border-slate-300 p-2 font-bold text-sky-900 bg-sky-50/30">{communeNameDisplay}</td>
-                    <td className="border border-slate-300 p-2 text-center font-black text-emerald-800 bg-emerald-100/60 text-sm">
+                    <td className="border border-slate-300 p-2 text-center text-slate-800 font-medium">{h.sttMau}</td>
+                    <td className="border border-slate-300 p-2 text-center text-slate-800 font-medium">{tkcsCodeDisplay}</td>
+                    <td className="border border-slate-300 p-2 text-slate-800">{tkcsNameDisplay}</td>
+                    <td className="border border-slate-300 p-2 text-center text-slate-800 font-medium">{communeCodeDisplay}</td>
+                    <td className="border border-slate-300 p-2 text-slate-800">{communeNameDisplay}</td>
+                    <td className="border border-slate-300 p-2 text-center text-slate-800 font-medium">
                       {areaCodeDisplay}
                     </td>
-                    <td className="border border-slate-300 p-2 font-extrabold text-emerald-950 bg-emerald-50/60">
+                    <td className="border border-slate-300 p-2 text-slate-800">
                       {areaNameDisplay}
                     </td>
 
-                    {/* Surveyor Assignment Column */}
-                    <td className="border border-slate-300 p-2 text-left">
-                      {h.assignedSurveyorName ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded font-bold text-[11px] bg-sky-100 text-sky-900 border border-sky-300">
-                          <UserCheck className="w-3 h-3 text-sky-700" />
-                          <span>{h.assignedSurveyorName}</span>
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-slate-400 italic">Chưa gán</span>
-                      )}
+                    {/* Surveyor Assignment Column - Plain Text */}
+                    <td className="border border-slate-300 p-2 text-left text-slate-800">
+                      {h.assignedSurveyorName || '---'}
                     </td>
 
-                    {/* Survey Status Column */}
-                    <td className="border border-slate-300 p-2 text-center">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded font-bold text-[10px] border ${
-                        status === 'DA_DUYET' 
-                          ? 'bg-purple-100 text-purple-900 border-purple-300' 
-                          : status === 'DA_HOAN_THANH'
-                          ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                          : status === 'DANG_NHAP'
-                          ? 'bg-amber-100 text-amber-900 border-amber-300'
-                          : 'bg-slate-100 text-slate-700 border-slate-300'
-                      }`}>
-                        {status === 'DA_DUYET' ? <Lock className="w-3 h-3" /> : status === 'DA_HOAN_THANH' ? <CheckCircle2 className="w-3 h-3" /> : null}
-                        <span>{SURVEY_STATUS_LABELS[status]?.label || 'Chưa nhập tin'}</span>
-                      </span>
+                    {/* Survey Status Column - Plain Text */}
+                    <td className="border border-slate-300 p-2 text-center text-slate-800 font-medium">
+                      {SURVEY_STATUS_LABELS[status]?.label || 'Chưa nhập tin'}
                     </td>
 
-                    <td className="border border-slate-300 p-2 text-center">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                        h.sampleStatus === 'CHÍNH THỨC' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-amber-100 text-amber-800 border border-amber-300'
-                      }`}>
-                        {h.sampleStatus}
-                      </span>
+                    {/* Sample Status Column - Plain Text */}
+                    <td className="border border-slate-300 p-2 text-center text-slate-800 font-medium">
+                      {h.sampleStatus || 'Chính thức'}
                     </td>
                     <td className="border border-slate-300 p-2 text-center text-slate-600">{h.sttGoc}</td>
-                    <td className="border border-slate-300 p-2 font-bold text-slate-900">{h.householdHead}</td>
+                    <td className="border border-slate-300 p-2 font-semibold text-slate-900">{h.householdHead}</td>
                     <td className="border border-slate-300 p-2 text-slate-600">{h.address}</td>
-                    <td className="border border-slate-300 p-2 text-center font-medium">{h.membersCount}</td>
-                    <td className="border border-slate-300 p-2 text-center font-bold text-sky-800">{h.sectorCode}</td>
-                    <td className="border border-slate-300 p-2 font-medium text-sky-800">{h.sectorName}</td>
+                    <td className="border border-slate-300 p-2 text-center text-slate-800 font-medium">{h.membersCount}</td>
+                    <td className="border border-slate-300 p-2 text-center text-slate-800 font-medium">{h.sectorCode}</td>
+                    <td className="border border-slate-300 p-2 text-slate-800">{h.sectorName}</td>
                     <td className="border border-slate-300 p-2 text-slate-600">{h.note}</td>
-                    <td className="border border-slate-300 p-2 text-right font-bold text-emerald-800">{inc.total.toLocaleString()}</td>
+                    <td className="border border-slate-300 p-2 text-right font-bold text-slate-900">{inc.total.toLocaleString()}</td>
                     {showEntryButton && (
                       <td className="border border-slate-300 p-2 text-center">
                         <div className="flex items-center justify-center gap-1">
@@ -3765,9 +3851,9 @@ export default function App() {
           )}
         </nav>
 
-        {/* Filter Toolbar - Bộ lọc dùng chung phân cấp chuẩn hóa */}
+        {/* Filter Toolbar - Bộ lọc dùng chung phân cấp chuẩn hóa gọn gàng, bằng nhau */}
         <div className="bg-white border-b border-slate-300 px-3 md:px-5 py-2 shadow-xs flex flex-wrap items-center justify-between gap-2.5 text-xs w-full">
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
             {/* 1. TKCS */}
             <div className="flex items-center gap-1.5">
               <span className="font-bold text-slate-700">TKCS:</span>
@@ -3786,9 +3872,9 @@ export default function App() {
                     }
                   }
                 }}
-                className="bg-sky-50 border border-slate-300 rounded px-2.5 py-1 text-slate-900 font-bold focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer max-w-[200px]"
+                className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
               >
-                <option value="ALL">-- Tất cả TKCS ({uniqueTkcsList.length}) --</option>
+                <option value="ALL">Tất cả</option>
                 {uniqueTkcsList.map(tk => (
                   <option key={tk.code} value={tk.code}>
                     [{tk.code}] {tk.name}
@@ -3797,9 +3883,9 @@ export default function App() {
               </select>
             </div>
 
-            {/* 2. Xã / Phường (Chỉ hiện các xã thuộc TKCS đã chọn) */}
+            {/* 2. Xã / Phường */}
             <div className="flex items-center gap-1.5">
-              <span className="font-bold text-slate-700">Xã/Phường:</span>
+              <span className="font-bold text-slate-700">Xã:</span>
               <select 
                 value={selectedCommuneId} 
                 onChange={e => {
@@ -3815,13 +3901,9 @@ export default function App() {
                     }
                   }
                 }}
-                className="bg-sky-50 border border-slate-300 rounded px-2.5 py-1 text-slate-900 font-bold focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer max-w-[220px]"
+                className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
               >
-                <option value="ALL">
-                  {selectedTkcs === 'ALL' 
-                    ? `-- Tất cả các xã (${communes.length}) --` 
-                    : `-- Tất cả xã thuộc [${selectedTkcs}] (${communes.filter(c => c.tkcsCode === selectedTkcs).length}) --`}
-                </option>
+                <option value="ALL">Tất cả</option>
                 {communes
                   .filter(c => selectedTkcs === 'ALL' || c.tkcsCode === selectedTkcs)
                   .map(c => (
@@ -3832,24 +3914,15 @@ export default function App() {
               </select>
             </div>
 
-            {/* 3. Địa bàn điều tra (Chỉ hiện các địa bàn thuộc Xã đã chọn) */}
+            {/* 3. Địa bàn điều tra */}
             <div className="flex items-center gap-1.5">
               <span className="font-bold text-slate-700">Địa bàn:</span>
               <select 
                 value={selectedAreaId} 
                 onChange={e => setSelectedAreaId(e.target.value)}
-                className="bg-sky-50 border border-slate-300 rounded px-2.5 py-1 text-slate-900 font-medium focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer max-w-[220px]"
+                className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
               >
-                <option value="ALL">
-                  {selectedCommuneId !== 'ALL'
-                    ? `-- Tất cả ĐB của xã (${areas.filter(a => a.communeId === selectedCommuneId || (Boolean(currentCommune?.communeCode) && (a as any).communeCode === currentCommune?.communeCode)).length}) --`
-                    : selectedTkcs !== 'ALL'
-                    ? `-- Tất cả ĐB của TKCS (${areas.filter(a => {
-                        const comm = communes.find(c => c.id === a.communeId || c.communeCode === (a as any).communeCode);
-                        return comm?.tkcsCode === selectedTkcs;
-                      }).length}) --`
-                    : `-- Tất cả địa bàn (${areas.length}) --`}
-                </option>
+                <option value="ALL">Tất cả</option>
                 {areas
                   .filter(a => {
                     if (selectedCommuneId !== 'ALL') {
@@ -3863,22 +3936,21 @@ export default function App() {
                   })
                   .map(a => (
                     <option key={a.id} value={a.id}>
-                      ĐB {a.code} - {a.name} ({a.householdCount || 0} hộ)
+                      ĐB {a.code} - {a.name}
                     </option>
                   ))}
               </select>
             </div>
 
-            {/* 4. Lọc theo ngành (Nguồn thu lớn nhất 1-4) */}
+            {/* 4. Ngành (1-4) */}
             <div className="flex items-center gap-1.5">
               <span className="font-bold text-slate-700">Ngành:</span>
               <select 
                 value={selectedSectorFilter} 
                 onChange={e => setSelectedSectorFilter(e.target.value)}
-                className="bg-amber-50/80 border border-amber-300 rounded px-2.5 py-1 text-slate-900 font-bold focus:outline-none focus:ring-1 focus:ring-amber-600 cursor-pointer max-w-[210px]"
-                title="Lọc danh sách hộ theo ngành kinh tế / nguồn thu lớn nhất"
+                className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
               >
-                <option value="ALL">-- Tất cả các ngành (1-4) --</option>
+                <option value="ALL">Tất cả</option>
                 <option value="1">1. Nông, lâm thủy sản</option>
                 <option value="2">2. Công nghiệp xây dựng</option>
                 <option value="3">3. Thương mại dịch vụ</option>
@@ -3886,79 +3958,15 @@ export default function App() {
               </select>
             </div>
 
-            {/* Các nút bấm lọc nhanh theo ngành */}
-            <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded border border-slate-200">
-              <button
-                type="button"
-                onClick={() => setSelectedSectorFilter('ALL')}
-                className={`px-2 py-0.5 rounded text-xs font-bold transition-all cursor-pointer ${
-                  selectedSectorFilter === 'ALL'
-                    ? 'bg-sky-800 text-white shadow-2xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
-                }`}
-                title="Xem tất cả các ngành"
-              >
-                Tất cả
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedSectorFilter(selectedSectorFilter === '1' ? 'ALL' : '1')}
-                className={`px-2 py-0.5 rounded text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                  selectedSectorFilter === '1'
-                    ? 'bg-emerald-700 text-white shadow-2xs ring-1 ring-emerald-800'
-                    : 'text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200'
-                }`}
-                title="Lọc hộ Nhóm 1: Nông nghiệp, lâm nghiệp, thủy sản"
-              >
-                <span>🌾 Ngành 1</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedSectorFilter(selectedSectorFilter === '2' ? 'ALL' : '2')}
-                className={`px-2 py-0.5 rounded text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                  selectedSectorFilter === '2'
-                    ? 'bg-amber-700 text-white shadow-2xs ring-1 ring-amber-800'
-                    : 'text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200'
-                }`}
-                title="Lọc hộ Nhóm 2: Công nghiệp chế biến, xây dựng"
-              >
-                <span>🏭 Ngành 2</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedSectorFilter(selectedSectorFilter === '3' ? 'ALL' : '3')}
-                className={`px-2 py-0.5 rounded text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                  selectedSectorFilter === '3'
-                    ? 'bg-blue-700 text-white shadow-2xs ring-1 ring-blue-800'
-                    : 'text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200'
-                }`}
-                title="Lọc hộ Nhóm 3: Thương mại bán buôn, bán lẻ, dịch vụ"
-              >
-                <span>🛒 Ngành 3</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedSectorFilter(selectedSectorFilter === '4' ? 'ALL' : '4')}
-                className={`px-2 py-0.5 rounded text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                  selectedSectorFilter === '4'
-                    ? 'bg-purple-700 text-white shadow-2xs ring-1 ring-purple-800'
-                    : 'text-purple-800 bg-purple-50 hover:bg-purple-100 border border-purple-200'
-                }`}
-                title="Lọc hộ Nhóm 4: Nguồn thu khác, tiền công, tiền lương"
-              >
-                <span>💼 Ngành 4</span>
-              </button>
-            </div>
-
-            {/* 5. Tìm kiếm chung */}
-            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-300 rounded px-2 py-0.5">
+            {/* 5. Tìm kiếm */}
+            <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded px-2.5 h-8 shadow-2xs">
               <Search className="w-3.5 h-3.5 text-slate-400" />
               <input 
                 type="text" 
-                placeholder="Tìm chủ hộ, xã, địa bàn..." 
+                placeholder="Tìm chủ hộ, xã, ĐB..." 
                 value={searchKeyword}
                 onChange={e => setSearchKeyword(e.target.value)}
-                className="bg-transparent border-none text-xs focus:outline-none w-44 font-medium"
+                className="bg-transparent border-none text-xs focus:outline-none w-36 font-medium text-slate-800"
               />
               {searchKeyword && (
                 <button
@@ -3983,7 +3991,7 @@ export default function App() {
                   setSelectedSectorFilter('ALL');
                   setSearchKeyword('');
                 }}
-                className="text-sky-700 hover:text-sky-900 font-bold text-xs underline cursor-pointer"
+                className="text-sky-700 hover:text-sky-900 font-bold text-xs underline cursor-pointer ml-1"
                 title="Xóa bộ lọc để xem toàn bộ dữ liệu"
               >
                 Đặt lại lọc
@@ -3997,36 +4005,12 @@ export default function App() {
             </span>
 
             <button 
-              onClick={() => setIsGlobalCatalogOpen(true)} 
-              className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-xs font-semibold rounded border border-amber-500 text-white flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-              title="Tra cứu danh mục sản phẩm, chăn nuôi, ngành nghề"
-            >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>Tra cứu danh mục</span>
-            </button>
-            <button 
-              onClick={handleExportExcel} 
-              className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 active:bg-emerald-800 text-xs font-semibold rounded border border-emerald-600 text-white flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-              title="Xuất Excel danh sách Bảng kê Hộ mẫu"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Xuất Bảng Kê</span>
-            </button>
-            <button 
               onClick={handleExportEnteredQuestionnairesExcel} 
-              className="px-2.5 py-1 bg-teal-700 hover:bg-teal-600 active:bg-teal-800 text-xs font-semibold rounded border border-teal-600 text-white flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-              title="Xuất Excel đầy đủ thông tin nội dung các phiếu đã nhập tin"
+              className="h-8 px-3.5 bg-teal-800 hover:bg-teal-700 active:bg-teal-900 text-xs font-bold rounded border border-teal-700 text-white flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              title="Xuất file Excel đầy đủ nội dung thông tin các phiếu đã nhập tin"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <FileSpreadsheet className="w-4 h-4" />
               <span>Xuất Excel Phiếu Đã Nhập</span>
-            </button>
-            <button 
-              onClick={() => window.print()} 
-              className="px-2.5 py-1 bg-sky-700 hover:bg-sky-600 active:bg-sky-800 text-xs font-semibold rounded border border-sky-600 text-white flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-              title="In báo cáo"
-            >
-              <Printer className="w-3.5 h-3.5" />
-              <span>In báo cáo</span>
             </button>
           </div>
         </div>
@@ -4038,42 +4022,8 @@ export default function App() {
         {/* TAB 1: IMPORT FILE EXCEL & CONFIG */}
         {activeTab === 'import' && (
           <div className="flex flex-col gap-3 w-full">
-            
-            {/* Header chuẩn hành chính gọn gàng (Đã loại bỏ bộ lọc trùng) */}
-            <div className="bg-white rounded-lg border border-slate-300 shadow-sm px-4 py-2.5 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-sky-800 text-white rounded-lg shrink-0 shadow-2xs">
-                  <TableProperties className="w-4 h-4" />
-                </div>
-                <div>
-                  <h2 className="font-extrabold text-slate-900 text-sm tracking-tight uppercase flex items-center gap-2">
-                    <span>Danh mục Xã & Tải Bảng kê Hộ mẫu</span>
-                    <span className="bg-sky-100 text-sky-800 text-xs px-2 py-0.5 rounded-full font-bold">
-                      {communes.length} xã/phường
-                    </span>
-                  </h2>
-                  <div className="text-xs text-slate-500 font-medium flex items-center gap-3 mt-0.5">
-                    <span>Đã nạp số liệu: <strong className="text-emerald-700 font-bold">{communes.filter(c => households.some(h => h.communeId === c.id || (Boolean(c.communeCode) && (h as any).communeCode === c.communeCode))).length} / {communes.length} xã</strong></span>
-                    <span>•</span>
-                    <span>Tổng số hộ: <strong className="text-sky-900 font-bold">{households.length} hộ</strong> ({areas.length} địa bàn)</span>
-                  </div>
-                </div>
-              </div>
-
-              {households.length > 0 && (
-                <button 
-                  onClick={() => setIsClearAllModalOpen(true)}
-                  className="px-2.5 py-1 bg-rose-700 hover:bg-rose-600 text-white rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors self-start md:self-auto"
-                  title="Xóa toàn bộ dữ liệu hộ điều tra đã nạp"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Xóa dữ liệu hộ</span>
-                </button>
-              )}
-            </div>
-
             {/* PHẦN TRÊN: BẢNG LƯỚI 6 CỘT DANH MỤC XÃ (Gọn 7-8 dòng, có thanh cuộn) */}
-            <div className="bg-white rounded-lg border border-slate-300 shadow-sm overflow-hidden flex flex-col">
+            <div className="bg-white rounded border border-slate-300 shadow-xs overflow-hidden flex flex-col">
               <div className="bg-[#058da0] text-white px-3.5 py-2.5 border-b border-[#047484] flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Building2 className="w-4 h-4 text-cyan-200" />
@@ -4081,9 +4031,21 @@ export default function App() {
                     1. Danh mục Xã & Tải danh sách Bảng kê Hộ mẫu ({filteredCommunesForImport.length} xã)
                   </span>
                 </div>
-                <span className="text-[11px] text-cyan-100 font-medium italic hidden sm:inline">
-                  Cuộn để xem 104 xã/phường • Bấm dòng xã để xem danh sách hộ phía dưới
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] text-cyan-100 font-medium italic hidden sm:inline">
+                    Đã nạp: {communes.filter(c => households.some(h => h.communeId === c.id || (Boolean(c.communeCode) && (h as any).communeCode === c.communeCode))).length}/{communes.length} xã • Bấm dòng xã để xem danh sách hộ
+                  </span>
+                  {households.length > 0 && (
+                    <button 
+                      onClick={() => setIsClearAllModalOpen(true)}
+                      className="px-2 py-0.5 bg-rose-700 hover:bg-rose-600 text-white rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-2xs transition-colors"
+                      title="Xóa toàn bộ dữ liệu hộ điều tra đã nạp"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Xóa dữ liệu hộ</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="overflow-x-auto overflow-y-auto max-h-[290px]">
@@ -4095,7 +4057,7 @@ export default function App() {
                       <th className="py-2.5 px-2.5 text-center border-r border-[#047484] w-24">Mã TKCS</th>
                       <th className="py-2.5 px-3.5 border-r border-[#047484] min-w-[190px]">Tên Xã, Phường</th>
                       <th className="py-2.5 px-2.5 text-center border-r border-[#047484] w-28">Mã Xã</th>
-                      <th className="py-2.5 px-3 text-center min-w-[240px]">Tải bảng kê</th>
+                      <th className="py-2.5 px-3 text-center min-w-[200px]">Tải bảng kê</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-200 font-medium">
@@ -4122,12 +4084,10 @@ export default function App() {
                               setSelectedTkcs(c.tkcsCode || 'ALL');
                               setSelectedAreaId('ALL');
                             }}
-                            className={`transition-colors cursor-pointer hover:bg-sky-100/60 ${
+                            className={`transition-colors cursor-pointer hover:bg-[#e6f6f8] ${
                               isSelected 
-                                ? 'bg-sky-100/90 font-semibold border-l-4 border-l-sky-800' 
-                                : isLoaded 
-                                ? 'bg-emerald-50/40' 
-                                : idx % 2 === 1 ? 'bg-slate-50/40' : 'bg-white'
+                                ? 'bg-sky-100 font-semibold border-l-4 border-l-sky-800' 
+                                : idx % 2 === 1 ? 'bg-[#f2fafb]' : 'bg-white'
                             }`}
                           >
                             <td className="py-2 px-3 text-center text-slate-500 font-bold border-r border-slate-200">
@@ -4136,29 +4096,24 @@ export default function App() {
                             <td className="py-2 px-3.5 font-bold text-slate-900 border-r border-slate-200">
                               {c.tkcsName || c.tkcsCode}
                             </td>
-                            <td className="py-2 px-2.5 text-center border-r border-slate-200">
-                              <span className="inline-block px-1.5 py-0.5 bg-sky-50 text-sky-800 font-bold font-mono rounded border border-sky-200 text-[11px]">
-                                {c.tkcsCode}
-                              </span>
+                            <td className="py-2 px-2.5 text-center font-mono text-slate-700 border-r border-slate-200">
+                              {c.tkcsCode}
                             </td>
                             <td className="py-2 px-3.5 font-bold text-slate-900 border-r border-slate-200">
                               {c.communeName}
                             </td>
-                            <td className="py-2 px-2.5 text-center border-r border-slate-200">
-                              <span className="inline-block px-1.5 py-0.5 bg-slate-100 text-slate-700 font-bold font-mono rounded border border-slate-300 text-[11px]">
-                                {c.communeCode}
-                              </span>
+                            <td className="py-2 px-2.5 text-center font-mono text-slate-700 border-r border-slate-200">
+                              {c.communeCode}
                             </td>
                             <td className="py-1.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                              <div className="flex items-center justify-center gap-2 flex-wrap">
                                 {isLoaded ? (
                                   <>
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded font-bold text-[11px] border border-emerald-300 shadow-2xs">
-                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
-                                      <span>{hhCount} hộ ({areaCount} ĐB)</span>
+                                    <span className="text-slate-800 font-medium text-xs">
+                                      {hhCount} hộ ({areaCount} ĐB)
                                     </span>
 
-                                    <label className="inline-flex items-center gap-1 px-2 py-0.5 bg-sky-700 hover:bg-sky-600 text-white rounded text-xs font-bold cursor-pointer transition-all shadow-2xs active:scale-95">
+                                    <label className="inline-flex items-center gap-1 px-2.5 py-1 bg-sky-700 hover:bg-sky-600 text-white rounded text-xs font-bold cursor-pointer transition-all shadow-2xs active:scale-95">
                                       <Upload className="w-3 h-3" />
                                       <span>Tải lại</span>
                                       <input 
@@ -4168,22 +4123,6 @@ export default function App() {
                                         className="hidden" 
                                       />
                                     </label>
-
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setSelectedCommuneId(c.id);
-                                        setSelectedTkcs(c.tkcsCode || 'ALL');
-                                        setSelectedAreaId('ALL');
-                                        setActiveTab('entry');
-                                        showNotification('success', `Đã mở danh sách hộ xã [${c.communeCode}] ${c.communeName}`);
-                                      }}
-                                      className="inline-flex items-center gap-1 px-2 py-0.5 bg-white hover:bg-sky-100 text-sky-900 border border-sky-300 rounded text-xs font-semibold cursor-pointer transition-colors"
-                                      title="Xem danh sách hộ tại Tab 2 (Nhập tin)"
-                                    >
-                                      <FileText className="w-3 h-3 text-sky-700" />
-                                      <span>Nhập tin</span>
-                                    </button>
                                   </>
                                 ) : (
                                   <label className="inline-flex items-center gap-1.5 px-3 py-1 bg-sky-700 hover:bg-sky-600 text-white rounded text-xs font-bold cursor-pointer transition-all shadow-xs hover:scale-105 active:scale-95">
@@ -4208,74 +4147,9 @@ export default function App() {
               </div>
             </div>
 
-            {/* PHẦN DƯỚI: BẢNG KÊ DANH SÁCH HỘ ĐIỀU TRA (Gọn 7-8 hộ, có thanh cuộn) */}
-            <div className="bg-white rounded-lg border border-slate-300 shadow-sm overflow-hidden flex flex-col">
-              <div className="bg-[#058da0] text-white px-3.5 py-2.5 border-b border-[#047484] flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-cyan-200" />
-                  <span className="font-extrabold text-white text-xs uppercase tracking-wide">
-                    2. Danh sách Bảng kê Hộ mẫu
-                  </span>
-                  {selectedCommuneId !== 'ALL' && currentCommune ? (
-                    <span className="px-2 py-0.5 bg-white/20 text-white border border-white/30 rounded font-bold text-xs">
-                      [{currentCommune.communeCode}] {currentCommune.communeName}
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 bg-white/20 text-white rounded font-bold text-xs">
-                      Tất cả các xã
-                    </span>
-                  )}
-                  <span className="text-xs text-cyan-100 font-bold">
-                    ({filteredHouseholds.length} hộ)
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {selectedCommuneId !== 'ALL' && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedCommuneId('ALL');
-                        setSelectedAreaId('ALL');
-                      }}
-                      className="px-2 py-1 bg-white/10 hover:bg-white/20 text-white border border-white/30 rounded text-xs font-semibold cursor-pointer transition-colors"
-                    >
-                      Xem toàn bộ hộ ({households.length})
-                    </button>
-                  )}
-
-                  <button 
-                    onClick={() => setActiveTab('entry')}
-                    className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded text-xs flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>Mở Nhập tin (Tab 2) ➔</span>
-                  </button>
-
-                  <button 
-                    onClick={handleExportExcel}
-                    className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
-                    title="Xuất Bảng kê Hộ mẫu"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Xuất Bảng Kê</span>
-                  </button>
-
-                  <button 
-                    onClick={handleExportEnteredQuestionnairesExcel}
-                    className="px-2.5 py-1 bg-teal-800 hover:bg-teal-700 text-white rounded text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
-                    title="Xuất file Excel đầy đủ nội dung các phiếu đã nhập tin"
-                  >
-                    <FileSpreadsheet className="w-3.5 h-3.5" />
-                    <span>Xuất Excel Phiếu Đã Nhập</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Bảng danh sách hộ dạng cuộn 7-8 dòng */}
-              <div>
-                {renderHouseholdTable(true, 'max-h-[310px]')}
-              </div>
+            {/* BẢNG KÊ DANH SÁCH HỘ ĐIỀU TRA */}
+            <div>
+              {renderHouseholdTable(true, 'max-h-[350px]')}
             </div>
 
           </div>
@@ -4294,34 +4168,16 @@ export default function App() {
                   Phân công điều tra viên, theo dõi tiến độ nhập và bấm "Nhập tin phiếu" tại từng hộ để hoàn thiện phiếu thu thập.
                 </p>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <button 
-                  onClick={handleExportExcel}
-                  className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
-                  title="Xuất danh sách Bảng kê Hộ mẫu"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Xuất Excel Bảng Kê Hộ Mẫu</span>
-                </button>
-                <button 
-                  onClick={handleExportEnteredQuestionnairesExcel}
-                  className="px-3 py-1.5 bg-teal-800 hover:bg-teal-700 text-white rounded text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
-                  title="Xuất file Excel đầy đủ nội dung thông tin các phiếu đã nhập tin"
-                >
-                  <FileSpreadsheet className="w-3.5 h-3.5" />
-                  <span>Xuất Excel Phiếu Đã Nhập</span>
-                </button>
-              </div>
             </div>
 
             {/* Advanced Filters for Surveyor & Survey Status */}
             <div className="bg-slate-50 border border-slate-200 rounded p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-              <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex flex-wrap items-center gap-2">
                 {currentUser?.role === 'SURVEYOR' && (
                   <button
                     type="button"
                     onClick={() => setOnlyMyHouseholds(!onlyMyHouseholds)}
-                    className={`px-3 py-1.5 rounded font-bold cursor-pointer transition-all flex items-center gap-1.5 border ${
+                    className={`h-8 px-3 rounded font-bold cursor-pointer transition-all flex items-center gap-1.5 border ${
                       onlyMyHouseholds 
                         ? 'bg-sky-800 text-white border-sky-900 shadow-2xs' 
                         : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
@@ -4335,14 +4191,14 @@ export default function App() {
                 )}
 
                 <div className="flex items-center gap-1.5">
-                  <span className="font-semibold text-slate-700">Người nhập / ĐTV:</span>
+                  <span className="font-semibold text-slate-700">Người nhập:</span>
                   <select
                     value={selectedSurveyorFilter}
                     onChange={e => setSelectedSurveyorFilter(e.target.value)}
-                    className="bg-white border border-slate-300 rounded px-2.5 py-1 text-slate-800 font-medium"
+                    className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
                   >
-                    <option value="ALL">-- Tất cả người nhập --</option>
-                    <option value="UNASSIGNED">Chưa phân công ĐTV</option>
+                    <option value="ALL">Tất cả</option>
+                    <option value="UNASSIGNED">Chưa phân công</option>
                     {surveyors.map(s => (
                       <option key={s.id} value={s.id}>
                         {s.code} - {s.name}
@@ -4352,17 +4208,17 @@ export default function App() {
                 </div>
 
                 <div className="flex items-center gap-1.5">
-                  <span className="font-semibold text-slate-700">Trạng thái phiếu:</span>
+                  <span className="font-semibold text-slate-700">Trạng thái:</span>
                   <select
                     value={selectedStatusFilter}
                     onChange={e => setSelectedStatusFilter(e.target.value)}
-                    className="bg-white border border-slate-300 rounded px-2.5 py-1 text-slate-800 font-medium"
+                    className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
                   >
-                    <option value="ALL">-- Tất cả trạng thái --</option>
-                    <option value="CHUA_NHAP">Chưa nhập tin</option>
-                    <option value="DANG_NHAP">Đang nhập tin</option>
-                    <option value="DA_HOAN_THANH">Đã nhập tin</option>
-                    <option value="DA_DUYET">Đã nhập tin (Đã duyệt)</option>
+                    <option value="ALL">Tất cả</option>
+                    <option value="CHUA_NHAP">Chưa nhập</option>
+                    <option value="DANG_NHAP">Đang nhập</option>
+                    <option value="DA_HOAN_THANH">Đã nhập</option>
+                    <option value="DA_DUYET">Đã duyệt</option>
                   </select>
                 </div>
 
@@ -4371,9 +4227,9 @@ export default function App() {
                   <select
                     value={selectedSectorFilter}
                     onChange={e => setSelectedSectorFilter(e.target.value)}
-                    className="bg-white border border-slate-300 rounded px-2.5 py-1 text-slate-800 font-medium"
+                    className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
                   >
-                    <option value="ALL">-- Tất cả ngành --</option>
+                    <option value="ALL">Tất cả</option>
                     <option value="1">1. Nông, lâm thủy sản</option>
                     <option value="2">2. Công nghiệp xây dựng</option>
                     <option value="3">3. Thương mại dịch vụ</option>
@@ -4499,53 +4355,172 @@ export default function App() {
               </div>
             </div>
 
-            {/* SURVEYOR PERSONAL PROGRESS SUMMARY BANNER */}
-            {currentUser?.role === 'SURVEYOR' && (() => {
-              const myAssignedHHs = households.filter(h => h.assignedSurveyorId === currentUser.id || currentUser.assignedAreas.includes('ALL') || currentUser.assignedAreas.includes(h.areaCode));
-              const mySurveyedHHs = myAssignedHHs.filter(h => isHouseholdSurveyed(h));
-              const myTotalMembers = mySurveyedHHs.reduce((acc, h) => acc + (Number(h.membersCount) || 1), 0);
-              const myTotalIncome = mySurveyedHHs.reduce((acc, h) => acc + calculateHouseholdTotalIncome(h).total, 0);
-              const myTnbq = myTotalMembers > 0 ? Math.round(myTotalIncome / myTotalMembers / 12) : 0;
-              const percentDone = myAssignedHHs.length > 0 ? Math.round((mySurveyedHHs.length / myAssignedHHs.length) * 100) : 0;
+            {/* SURVEYOR PERSONAL PROGRESS SUMMARY BANNER & BREAKDOWN BY COMMUNE AND AREA */}
+            {(currentUser?.role === 'SURVEYOR' || currentUser?.role === 'ADMIN') && surveyorAssignedAreasSummary.length > 0 && (
+              <div className="bg-gradient-to-br from-slate-900 via-teal-950 to-slate-900 rounded-lg p-4 text-white shadow-md border border-teal-700/70 flex flex-col gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-teal-700/60 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="px-2.5 py-1 rounded bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider shadow-2xs">
+                      {currentUser?.role === 'SURVEYOR' ? 'TIẾN ĐỘ CỦA BẠN' : 'THEO DÕI TIẾN ĐỘ ĐỊA BÀN'}
+                    </span>
+                    <h3 className="font-black text-sm md:text-base text-white flex items-center gap-2">
+                      <Users className="w-4 h-4 text-amber-300" />
+                      <span>{currentUser.name} ({currentUser.code})</span>
+                    </h3>
+                  </div>
 
-              return (
-                <div className="bg-gradient-to-r from-teal-900 via-sky-950 to-teal-900 rounded-lg p-4 text-white shadow-md border border-teal-700 flex flex-col gap-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-teal-700/60 pb-2.5">
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-black text-[11px] uppercase tracking-wider">
-                        TIẾN ĐỘ CỦA BẠN
-                      </span>
-                      <h3 className="font-black text-sm text-white flex items-center gap-1.5">
-                        <Users className="w-4 h-4 text-amber-300" />
-                        <span>Điều tra viên: {currentUser.name} ({currentUser.code})</span>
-                      </h3>
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 cursor-pointer bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded border border-white/20 transition-colors text-xs font-bold text-amber-200">
+                      <input 
+                        type="checkbox"
+                        checked={tnhSurveyorOnlyMine}
+                        onChange={(e) => setTnhSurveyorOnlyMine(e.target.checked)}
+                        className="rounded text-teal-500 w-4 h-4 cursor-pointer"
+                      />
+                      <span>Chỉ tổng hợp các địa bàn & xã tôi phụ trách</span>
+                    </label>
+                  </div>
+                </div>
+
+                {/* 4 KPI Cards */}
+                {(() => {
+                  const totalAssigned = surveyorAssignedAreasSummary.reduce((acc, a) => acc + a.totalAssigned, 0);
+                  const totalSurveyed = surveyorAssignedAreasSummary.reduce((acc, a) => acc + a.surveyedCount, 0);
+                  const totalRemaining = Math.max(0, totalAssigned - totalSurveyed);
+                  const totalMembers = surveyorAssignedAreasSummary.reduce((acc, a) => acc + a.totalMembers, 0);
+                  const totalIncome = surveyorAssignedAreasSummary.reduce((acc, a) => acc + a.totalIncome, 0);
+                  const overallTnbq = totalMembers > 0 ? Math.round(totalIncome / totalMembers / 12) : 0;
+                  const overallPercent = totalAssigned > 0 ? Math.round((totalSurveyed / totalAssigned) * 100) : 0;
+
+                  return (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
+                        <span className="text-teal-200 block text-[11px]">Tổng số hộ phụ trách:</span>
+                        <strong className="text-lg font-black text-white">{totalAssigned} hộ</strong>
+                        <span className="block text-[10px] text-teal-300 mt-0.5">({surveyorAssignedAreasSummary.length} địa bàn)</span>
+                      </div>
+                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
+                        <span className="text-emerald-200 block text-[11px]">Đã điều tra xong:</span>
+                        <strong className="text-lg font-black text-emerald-300">{totalSurveyed} / {totalAssigned} hộ ({overallPercent}%)</strong>
+                        <span className="block text-[10px] text-emerald-300 mt-0.5">Còn lại: {totalRemaining} hộ</span>
+                      </div>
+                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
+                        <span className="text-sky-200 block text-[11px]">Tổng nhân khẩu điều tra:</span>
+                        <strong className="text-lg font-black text-sky-200">{totalMembers} người</strong>
+                        <span className="block text-[10px] text-sky-300 mt-0.5">Tổng TN: {totalIncome.toLocaleString()} (1.000 đ)</span>
+                      </div>
+                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
+                        <span className="text-amber-200 block text-[11px]">TNBQ bình quân tháng:</span>
+                        <strong className="text-lg font-black text-amber-300">{overallTnbq > 0 ? `${overallTnbq.toLocaleString()} đ` : '0 đ'}</strong>
+                        <span className="block text-[10px] text-amber-200 mt-0.5">đ/người/tháng</span>
+                      </div>
                     </div>
+                  );
+                })()}
+
+                {/* BẢNG TỔNG HỢP THEO ĐỊA BÀN VÀ XÃ PHỤ TRÁCH */}
+                <div className="bg-white text-slate-900 rounded border border-teal-600/50 overflow-hidden shadow-xs mt-1">
+                  <div className="bg-teal-900 text-white px-3 py-2 flex items-center justify-between border-b border-teal-800 text-xs">
+                    <span className="font-bold flex items-center gap-1.5 uppercase">
+                      <Layers className="w-3.5 h-3.5 text-amber-300" />
+                      <span>Bảng tổng hợp chi tiết theo từng địa bàn và xã bạn phụ trách</span>
+                    </span>
                     <span className="text-xs text-teal-200">
-                      Địa bàn phụ trách: <strong className="text-amber-300">{currentUser.assignedAreas.includes('ALL') ? 'Tất cả địa bàn' : currentUser.assignedAreas.join(', ')}</strong>
+                      Gồm <strong>{surveyorAssignedAreasSummary.length}</strong> địa bàn
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-                    <div className="bg-white/10 rounded p-2.5 border border-white/10">
-                      <span className="text-teal-200 block text-[11px]">Tổng số hộ phụ trách:</span>
-                      <strong className="text-lg font-black text-white">{myAssignedHHs.length} hộ</strong>
-                    </div>
-                    <div className="bg-white/10 rounded p-2.5 border border-white/10">
-                      <span className="text-emerald-200 block text-[11px]">Đã điều tra xong:</span>
-                      <strong className="text-lg font-black text-emerald-300">{mySurveyedHHs.length} / {myAssignedHHs.length} hộ ({percentDone}%)</strong>
-                    </div>
-                    <div className="bg-white/10 rounded p-2.5 border border-white/10">
-                      <span className="text-sky-200 block text-[11px]">Tổng nhân khẩu điều tra:</span>
-                      <strong className="text-lg font-black text-sky-200">{myTotalMembers} người</strong>
-                    </div>
-                    <div className="bg-white/10 rounded p-2.5 border border-white/10">
-                      <span className="text-amber-200 block text-[11px]">TNBQ bình quân tháng:</span>
-                      <strong className="text-lg font-black text-amber-300">{myTnbq > 0 ? `${myTnbq.toLocaleString()} đ` : '0 đ'}</strong>
-                    </div>
+                  <div className="overflow-x-auto max-h-[260px] overflow-y-auto">
+                    <table className="w-full border-collapse text-xs whitespace-nowrap text-left">
+                      <thead className="sticky top-0 bg-slate-100 text-slate-800 font-bold border-b border-slate-300 text-[11px]">
+                        <tr>
+                          <th className="p-2 text-center w-10 border border-slate-300">STT</th>
+                          <th className="p-2 border border-slate-300">Xã / Phường</th>
+                          <th className="p-2 border border-slate-300">Địa bàn điều tra</th>
+                          <th className="p-2 text-center border border-slate-300 w-16">Chỉ tiêu</th>
+                          <th className="p-2 text-center border border-slate-300 w-16">Đã làm</th>
+                          <th className="p-2 text-center border border-slate-300 w-16">Còn lại</th>
+                          <th className="p-2 text-center border border-slate-300 min-w-[130px]">Tiến độ</th>
+                          <th className="p-2 text-center border border-slate-300">Nhân khẩu</th>
+                          <th className="p-2 text-right border border-slate-300">Tổng TN (1.000 đ)</th>
+                          <th className="p-2 text-right border border-slate-300">TNBQ/tháng</th>
+                          <th className="p-2 text-center border border-slate-300">Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {surveyorAssignedAreasSummary.map((item, idx) => {
+                          const isDone = item.totalAssigned > 0 && item.surveyedCount >= item.totalAssigned;
+                          return (
+                            <tr key={item.key} className="odd:bg-white even:bg-[#f2fafb] hover:bg-[#e6f6f8] border-b border-slate-200 transition-colors">
+                              <td className="p-2 text-center text-slate-600 border border-slate-300">{idx + 1}</td>
+                              <td className="p-2 font-bold text-slate-900 border border-slate-300">
+                                [{item.communeCode}] {item.communeName}
+                              </td>
+                              <td className="p-2 border border-slate-300">
+                                <span className="font-semibold text-slate-800">ĐB {item.areaCode}</span>
+                                <span className="text-slate-500 ml-1">({item.areaName})</span>
+                              </td>
+                              <td className="p-2 text-center font-bold text-slate-800 border border-slate-300">{item.totalAssigned}</td>
+                              <td className="p-2 text-center font-bold text-slate-800 border border-slate-300">{item.surveyedCount}</td>
+                              <td className="p-2 text-center font-bold text-slate-800 border border-slate-300">{item.remainingCount}</td>
+                              <td className="p-2 text-center border border-slate-300">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="flex-1 bg-slate-200 rounded-full h-2 overflow-hidden">
+                                    <div 
+                                      className={`h-full rounded-full transition-all ${isDone ? 'bg-emerald-600' : item.percentDone > 50 ? 'bg-teal-600' : 'bg-amber-500'}`}
+                                      style={{ width: `${Math.min(100, item.percentDone)}%` }}
+                                    />
+                                  </div>
+                                  <span className={`text-[10px] font-bold w-9 text-right ${isDone ? 'text-emerald-700' : 'text-slate-700'}`}>
+                                    {item.percentDone}%
+                                  </span>
+                                </div>
+                              </td>
+                              <td className="p-2 text-center text-slate-800 border border-slate-300">{item.totalMembers} ng</td>
+                              <td className="p-2 text-right text-slate-800 border border-slate-300">{item.totalIncome.toLocaleString()}</td>
+                              <td className="p-2 text-right font-bold text-slate-900 border border-slate-300">
+                                {item.perCapitaMonth > 0 ? `${item.perCapitaMonth.toLocaleString()} đ` : '---'}
+                              </td>
+                              <td className="p-2 text-center border border-slate-300">
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setTnhScopeMode('COMMUNE_SECTOR');
+                                      setTnhSelectedCommuneId(item.communeId);
+                                      setSelectedCommuneId(item.communeId);
+                                      setSelectedAreaId(item.areaId || item.areaCode);
+                                      showNotification('success', `Đã liên kết Bảng 2 theo địa bàn [${item.areaCode}] xã [${item.communeName}]`);
+                                    }}
+                                    className="px-2 py-0.5 bg-sky-700 hover:bg-sky-600 text-white rounded text-[11px] font-bold cursor-pointer transition-colors shadow-2xs"
+                                    title="Xem tổng hợp suy rộng của địa bàn này ở Bảng 2"
+                                  >
+                                    Xem Bảng 2
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedCommuneId(item.communeId);
+                                      setSelectedAreaId(item.areaId || item.areaCode);
+                                      setActiveTab('entry');
+                                      showNotification('success', `Đã chuyển đến Nhập tin cho địa bàn [${item.areaCode}]`);
+                                    }}
+                                    className="px-2 py-0.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-[11px] font-bold cursor-pointer transition-colors shadow-2xs"
+                                    title="Chuyển sang Tab 2 để nhập tin phiếu hộ cho địa bàn này"
+                                  >
+                                    Nhập tin
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
-              );
-            })()}
+              </div>
+            )}
 
             {/* BẢNG 1: DANH MỤC XÃ & CHỈ TIÊU MẪU ĐIỀU TRA (19 CỘT THEO QUY CHUẨN) */}
             <div className="bg-white border border-slate-300 rounded-lg shadow-sm overflow-hidden flex flex-col">
@@ -4657,17 +4632,15 @@ export default function App() {
                             setSelectedCommuneId(c.id);
                             showNotification('success', `Đã liên kết số liệu Tổng hợp nhanh cho xã [${c.communeCode}] ${c.communeName}`);
                           }}
-                          className={`transition-colors cursor-pointer hover:bg-sky-100/70 ${
+                          className={`transition-colors cursor-pointer hover:bg-[#e6f6f8] ${
                             isCommuneSelected 
-                              ? 'bg-sky-100 font-bold border-l-4 border-l-sky-800 shadow-2xs' 
+                              ? 'bg-sky-100 font-bold border-l-4 border-l-sky-800' 
                               : isTkcsSelected
-                              ? 'bg-amber-50/80 font-semibold border-l-2 border-l-amber-600'
-                              : item.totalHH > 0
-                              ? 'bg-emerald-50/30'
-                              : idx % 2 === 1 ? 'bg-slate-50/50' : 'bg-white'
+                              ? 'bg-amber-100/60 font-semibold border-l-2 border-l-amber-600'
+                              : idx % 2 === 1 ? 'bg-[#f2fafb]' : 'bg-white'
                           }`}
                         >
-                          <td className="p-2 border border-slate-300 text-center font-medium bg-slate-50 text-slate-500">
+                          <td className="p-2 border border-slate-300 text-center text-slate-500">
                             {idx + 1}
                           </td>
 
@@ -4681,15 +4654,10 @@ export default function App() {
                               setSelectedTkcs(c.tkcsCode || 'ALL');
                               showNotification('success', `Đã liên kết số liệu Tổng hợp nhanh cho TKCS [${c.tkcsCode}] ${c.tkcsName || ''}`);
                             }}
-                            className="p-2 border border-slate-300 text-left font-bold text-slate-900 hover:bg-amber-100/80 transition-colors group cursor-pointer"
+                            className="p-2 border border-slate-300 text-left font-bold text-slate-900 cursor-pointer"
                             title={`Bấm vào đây để chọn TKCS [${c.tkcsCode}] ${c.tkcsName || ''} link xuống bảng dưới`}
                           >
-                            <div className="flex items-center justify-between gap-1">
-                              <span className={isTkcsSelected ? 'text-amber-950 font-black' : ''}>{c.tkcsName || c.tkcsCode}</span>
-                              <span className="opacity-0 group-hover:opacity-100 text-[10px] text-amber-800 bg-amber-100 px-1 py-0.2 rounded border border-amber-300">
-                                📍 Chọn TKCS
-                              </span>
-                            </div>
+                            <span className={isTkcsSelected ? 'text-amber-950 font-black' : ''}>{c.tkcsName || c.tkcsCode}</span>
                           </td>
                           <td 
                             onClick={(e) => {
@@ -4700,16 +4668,10 @@ export default function App() {
                               setSelectedTkcs(c.tkcsCode || 'ALL');
                               showNotification('success', `Đã liên kết số liệu Tổng hợp nhanh cho TKCS [${c.tkcsCode}] ${c.tkcsName || ''}`);
                             }}
-                            className="p-2 border border-slate-300 text-center hover:bg-amber-100/80 cursor-pointer"
+                            className="p-2 border border-slate-300 text-center font-mono text-slate-700 cursor-pointer"
                             title={`Bấm chọn TKCS [${c.tkcsCode}]`}
                           >
-                            <span className={`inline-block px-1.5 py-0.5 font-mono font-bold rounded text-[11px] border ${
-                              isTkcsSelected 
-                                ? 'bg-amber-500 text-white border-amber-600' 
-                                : 'bg-sky-50 text-sky-800 border-sky-200'
-                            }`}>
-                              {c.tkcsCode}
-                            </span>
+                            {c.tkcsCode}
                           </td>
 
                           {/* Tên & Mã Xã - Bấm để chọn Xã này */}
@@ -4722,15 +4684,10 @@ export default function App() {
                               setSelectedCommuneId(c.id);
                               showNotification('success', `Đã liên kết số liệu Tổng hợp nhanh cho xã [${c.communeCode}] ${c.communeName}`);
                             }}
-                            className="p-2 border border-slate-300 text-left font-bold text-slate-900 hover:bg-sky-200/60 transition-colors group cursor-pointer"
+                            className="p-2 border border-slate-300 text-left font-bold text-slate-900 cursor-pointer"
                             title={`Bấm vào đây để chọn xã [${c.communeCode}] ${c.communeName} link xuống bảng dưới`}
                           >
-                            <div className="flex items-center justify-between gap-1">
-                              <span className={isCommuneSelected ? 'text-sky-950 font-black' : ''}>{c.communeName}</span>
-                              <span className="opacity-0 group-hover:opacity-100 text-[10px] text-sky-800 bg-sky-100 px-1 py-0.2 rounded border border-sky-300">
-                                📍 Chọn Xã
-                              </span>
-                            </div>
+                            <span className={isCommuneSelected ? 'text-sky-950 font-black' : ''}>{c.communeName}</span>
                           </td>
                           <td 
                             onClick={(e) => {
@@ -4741,16 +4698,10 @@ export default function App() {
                               setSelectedCommuneId(c.id);
                               showNotification('success', `Đã liên kết số liệu Tổng hợp nhanh cho xã [${c.communeCode}] ${c.communeName}`);
                             }}
-                            className="p-2 border border-slate-300 text-center hover:bg-sky-200/60 cursor-pointer"
+                            className="p-2 border border-slate-300 text-center font-mono text-slate-700 cursor-pointer"
                             title={`Bấm chọn xã [${c.communeCode}]`}
                           >
-                            <span className={`inline-block px-1.5 py-0.5 font-mono font-bold rounded text-[11px] border ${
-                              isCommuneSelected 
-                                ? 'bg-sky-800 text-white border-sky-900' 
-                                : 'bg-slate-100 text-slate-700 border-slate-300'
-                            }`}>
-                              {c.communeCode}
-                            </span>
+                            {c.communeCode}
                           </td>
 
                           {/* Bảng kê trong xã (Hộ) */}
@@ -4758,7 +4709,7 @@ export default function App() {
                           <td className="p-2 border border-slate-300 text-center text-slate-700">{c.bkCongNghiepXayDung ?? '---'}</td>
                           <td className="p-2 border border-slate-300 text-center text-slate-700">{c.bkThuongMaiDichVu ?? '---'}</td>
                           <td className="p-2 border border-slate-300 text-center text-slate-700">{c.bkThuKhacLuong ?? '---'}</td>
-                          <td className="p-2 border border-slate-300 text-center font-bold text-slate-900 bg-amber-50/40">
+                          <td className="p-2 border border-slate-300 text-center font-bold text-slate-900">
                             {c.bkTongSo ?? '---'}
                           </td>
 
@@ -4769,33 +4720,30 @@ export default function App() {
                           <td className="p-2 border border-slate-300 text-center text-slate-600">{c.ttThuKhacLuong !== undefined ? `${c.ttThuKhacLuong}%` : '---'}</td>
 
                           {/* Mẫu chính thức */}
-                          <td className="p-2 border border-slate-300 text-center font-medium text-emerald-800">{c.mauNongLamThuySan ?? '---'}</td>
-                          <td className="p-2 border border-slate-300 text-center font-medium text-emerald-800">{c.mauCongNghiepXayDung ?? '---'}</td>
-                          <td className="p-2 border border-slate-300 text-center font-medium text-emerald-800">{c.mauThuongMaiDichVu ?? '---'}</td>
-                          <td className="p-2 border border-slate-300 text-center font-medium text-emerald-800">{c.mauThuKhacLuong ?? '---'}</td>
-                          <td className="p-2 border border-slate-300 text-center font-black text-emerald-950 bg-emerald-50/60">
+                          <td className="p-2 border border-slate-300 text-center text-slate-700">{c.mauNongLamThuySan ?? '---'}</td>
+                          <td className="p-2 border border-slate-300 text-center text-slate-700">{c.mauCongNghiepXayDung ?? '---'}</td>
+                          <td className="p-2 border border-slate-300 text-center text-slate-700">{c.mauThuongMaiDichVu ?? '---'}</td>
+                          <td className="p-2 border border-slate-300 text-center text-slate-700">{c.mauThuKhacLuong ?? '---'}</td>
+                          <td className="p-2 border border-slate-300 text-center font-bold text-slate-900">
                             {c.mauTongSo ?? '---'}
                           </td>
 
                           {/* Mẫu dự phòng */}
-                          <td className="p-2 border border-slate-300 text-center font-semibold text-amber-800 bg-amber-50/30">
+                          <td className="p-2 border border-slate-300 text-center text-slate-700">
                             {c.mauDuPhong ?? '---'}
                           </td>
 
                           {/* Kết quả điều tra thực tế & Liên kết TNH */}
-                          <td className="p-2 border border-slate-300 text-center font-bold">
+                          <td className="p-2 border border-slate-300 text-center font-medium text-slate-800">
                             {item.surveyedCount > 0 ? (
-                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-emerald-100 text-emerald-900 border border-emerald-300 rounded font-bold text-[11px]" title={`Đã điều tra thực tế ${item.surveyedCount}/${item.officialCount} hộ, tổng ${item.totalMembers} nhân khẩu`}>
-                                <CheckCircle2 className="w-3 h-3 text-emerald-700 shrink-0" />
-                                <span>{item.surveyedCount} hộ ({item.totalMembers} ng)</span>
-                              </span>
+                              <span>{item.surveyedCount} hộ ({item.totalMembers} ng)</span>
                             ) : item.totalHH > 0 ? (
-                              <span className="text-slate-400 text-[11px]">0/{item.totalHH} hộ</span>
+                              <span className="text-slate-400">0/{item.totalHH} hộ</span>
                             ) : (
-                              <span className="text-slate-400 text-[11px] italic">Chưa nạp</span>
+                              <span className="text-slate-400 italic">Chưa nạp</span>
                             )}
                           </td>
-                          <td className="p-2 border border-slate-300 text-right font-black text-emerald-900 bg-emerald-50/40" title={item.totalMembers > 0 ? `${item.totalMembers} nhân khẩu điều tra` : ''}>
+                          <td className="p-2 border border-slate-300 text-right font-bold text-slate-900">
                             {item.perCapitaMonth > 0 ? `${item.perCapitaMonth.toLocaleString()} đ` : '---'}
                           </td>
                           <td className="p-2 border border-slate-300 text-center" onClick={(e) => e.stopPropagation()}>
@@ -4940,44 +4888,42 @@ export default function App() {
                   </thead>
                   <tbody>
                     {tnhSummary.sectorData.map((s, idx) => (
-                      <tr key={s.code} className="hover:bg-sky-50 transition-colors">
-                        <td className="border border-slate-300 p-2.5 text-center font-medium bg-slate-50">{idx + 1}</td>
-                        <td className="border border-slate-300 p-2.5 text-center font-bold text-sky-800 bg-sky-50/50">{s.code}</td>
+                      <tr key={s.code} className="odd:bg-white even:bg-[#f2fafb] hover:bg-[#e6f6f8] transition-colors">
+                        <td className="border border-slate-300 p-2.5 text-center text-slate-500">{idx + 1}</td>
+                        <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">{s.code}</td>
                         <td className="border border-slate-300 p-2.5 font-bold text-slate-800">{s.name}</td>
                         
                         {/* 1. Tổng số hộ */}
-                        <td className="border border-slate-300 p-2.5 text-center font-extrabold text-slate-900 bg-amber-50/30">
+                        <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">
                           {s.bkCount.toLocaleString()}
                         </td>
 
                         {/* 2. Tỷ trọng cơ cấu */}
-                        <td className="border border-slate-300 p-2.5 text-center font-extrabold text-cyan-900 bg-cyan-50/30">
+                        <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">
                           {s.percent}%
                         </td>
 
                         {/* 3. Mẫu chính thức phân bổ */}
-                        <td className="border border-slate-300 p-2.5 text-center font-extrabold text-emerald-900 bg-emerald-50/30">
+                        <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">
                           {s.mauAlloc}
                         </td>
 
                         {/* Số hộ điều tra thực tế */}
-                        <td className="border border-slate-300 p-2.5 text-center font-bold">
+                        <td className="border border-slate-300 p-2.5 text-center text-slate-800 font-medium">
                           {s.surveyCount > 0 ? (
-                            <span className="inline-block px-2 py-0.5 bg-emerald-100 text-emerald-900 rounded font-bold border border-emerald-300">
-                              {s.surveyCount} hộ ({s.groupMembers} ng)
-                            </span>
+                            <span>{s.surveyCount} hộ ({s.groupMembers} ng)</span>
                           ) : (
                             <span className="text-slate-400 italic">Chưa nạp</span>
                           )}
                         </td>
 
                         {/* TNBQ đầu người/tháng theo loại hộ */}
-                        <td className="border border-slate-300 p-2.5 text-right font-extrabold text-emerald-900 bg-emerald-50/50">
+                        <td className="border border-slate-300 p-2.5 text-right font-bold text-slate-900">
                           {s.perCapitaMonth > 0 ? `${s.perCapitaMonth.toLocaleString()} đ` : '0 đ'}
                         </td>
 
                         {/* 4. Suy rộng TNBQ = Tỉ trọng cơ cấu * TNBQ đầu người/tháng theo loại hộ */}
-                        <td className="border border-slate-300 p-2.5 text-right font-black text-sky-950 bg-amber-100/40 text-sm">
+                        <td className="border border-slate-300 p-2.5 text-right font-black text-slate-900 text-sm">
                           {s.extrapolatedIncomeYear > 0 ? `${s.extrapolatedIncomeYear.toLocaleString()} đ` : '0 đ'}
                         </td>
                       </tr>
@@ -5092,14 +5038,14 @@ export default function App() {
                             {sData.sList.map((h, idx) => {
                               const inc = calculateHouseholdTotalIncome(h).total;
                               return (
-                                <tr key={h.id} className="hover:bg-sky-50/60 transition-colors border-b border-slate-200">
-                                  <td className="border border-slate-300 p-2 text-center font-medium bg-slate-50">{idx + 1}</td>
-                                  <td className="border border-slate-300 p-2 font-bold text-sky-900">{h.communeName || formCommuneName || '---'}</td>
-                                  <td className="border border-slate-300 p-2 font-medium">{h.areaName || 'Địa bàn'}</td>
-                                  <td className="border border-slate-300 p-2 text-center font-bold text-slate-800">{h.sttMau}</td>
+                                <tr key={h.id} className="odd:bg-white even:bg-[#f2fafb] hover:bg-[#e6f6f8] transition-colors border-b border-slate-200">
+                                  <td className="border border-slate-300 p-2 text-center text-slate-500">{idx + 1}</td>
+                                  <td className="border border-slate-300 p-2 font-bold text-slate-900">{h.communeName || formCommuneName || '---'}</td>
+                                  <td className="border border-slate-300 p-2 font-medium text-slate-800">{h.areaName || 'Địa bàn'}</td>
+                                  <td className="border border-slate-300 p-2 text-center text-slate-800">{h.sttMau}</td>
                                   <td className="border border-slate-300 p-2 font-bold text-slate-900">{h.householdHead}</td>
-                                  <td className="border border-slate-300 p-2 text-center font-bold text-rose-900 bg-rose-50/30">{h.membersCount}</td>
-                                  <td className="border border-slate-300 p-2 text-right font-extrabold text-emerald-800 bg-amber-50/30">{inc.toLocaleString()}</td>
+                                  <td className="border border-slate-300 p-2 text-center text-slate-800">{h.membersCount}</td>
+                                  <td className="border border-slate-300 p-2 text-right font-bold text-slate-900">{inc.toLocaleString()}</td>
                                 </tr>
                               );
                             })}
@@ -5260,12 +5206,12 @@ export default function App() {
                         const perCapita = overviewItem ? overviewItem.perCapitaMonth : 0;
                         const isDup = duplicateCommunesDetected.some(dup => dup.id === c.id);
                         return (
-                          <tr key={c.id} className={`transition-colors ${isDup ? 'bg-amber-50/80 hover:bg-amber-100/80' : 'hover:bg-sky-50'}`}>
-                            <td className="border border-slate-300 p-2 text-center font-bold text-sky-900 bg-sky-50/50">{c.communeCode}</td>
+                          <tr key={c.id} className={`transition-colors odd:bg-white even:bg-[#f2fafb] hover:bg-[#e6f6f8] ${isDup ? 'bg-amber-100/60' : ''}`}>
+                            <td className="border border-slate-300 p-2 text-center font-mono text-slate-700">{c.communeCode}</td>
                             <td className="border border-slate-300 p-2 font-bold text-slate-900">
                               <span>{c.communeName}</span>
                               {isDup && (
-                                <span className="ml-1.5 px-1.5 py-0.5 bg-amber-100 text-amber-900 border border-amber-300 rounded font-black text-[10px]">
+                                <span className="ml-1.5 px-1 py-0.2 bg-amber-100 text-amber-900 rounded text-[10px]">
                                   Trùng lặp
                                 </span>
                               )}
@@ -5274,9 +5220,9 @@ export default function App() {
                               <span className="font-bold text-slate-800 block">{c.tkcsName || 'TKCS'}</span>
                               <span className="text-[10px] text-slate-500 font-semibold">[{c.tkcsCode}]</span>
                             </td>
-                            <td className="border border-slate-300 p-2 text-center font-semibold text-slate-700">{areasCount}</td>
-                            <td className="border border-slate-300 p-2 text-center font-bold text-emerald-800">{hhCount} hộ</td>
-                            <td className="border border-slate-300 p-2 text-right font-black text-emerald-900 bg-emerald-50/20">
+                            <td className="border border-slate-300 p-2 text-center text-slate-700">{areasCount}</td>
+                            <td className="border border-slate-300 p-2 text-center text-slate-800">{hhCount} hộ</td>
+                            <td className="border border-slate-300 p-2 text-right font-bold text-slate-900">
                               {perCapita > 0 ? `${perCapita.toLocaleString()} đ` : '---'}
                             </td>
                             <td className="border border-slate-300 p-2 text-center">
