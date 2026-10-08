@@ -556,6 +556,7 @@ export default function ExcelHeaderConfigModal({
             communeCode: resolvedCommuneCode,
             communeName: resolvedCommuneName,
             areaName: sName,
+            sheetName: sName,
             sttMau: sttVal,
             sampleStatus: statusVal,
             sttGoc: sttGocVal,

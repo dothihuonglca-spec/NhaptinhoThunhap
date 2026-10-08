@@ -528,25 +528,64 @@ export default function App() {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // Tự động đồng bộ và khôi phục tên địa bàn (tên sheet) từ danh sách địa bàn nếu hộ chưa có tên địa bàn
+  // Tự động đồng bộ và khôi phục tên địa bàn (tên sheet), mã/tên xã, TKCS cho các hộ gia đình từ danh mục
   useEffect(() => {
     if (households.length > 0) {
       let hasHealed = false;
       const healedHouseholds = households.map(h => {
-        const curName = (h.areaName || '').trim();
+        let updated = { ...h };
+        let changed = false;
+
+        // 1. Đồng bộ xã & TKCS từ danh mục communes
+        const matchedCommune = communes.find(c => 
+          (Boolean(h.communeCode) && c.communeCode === h.communeCode) ||
+          (Boolean(h.communeId) && (c.id === h.communeId || c.communeCode === h.communeId)) ||
+          (Boolean(h.communeName) && c.communeName && h.communeName.trim().toLowerCase() === c.communeName.trim().toLowerCase())
+        );
+
+        if (matchedCommune) {
+          if (updated.communeId !== matchedCommune.id) {
+            updated.communeId = matchedCommune.id;
+            changed = true;
+          }
+          if (updated.communeCode !== matchedCommune.communeCode) {
+            updated.communeCode = matchedCommune.communeCode;
+            changed = true;
+          }
+          if (!updated.communeName || updated.communeName === 'Xã/Phường') {
+            updated.communeName = matchedCommune.communeName;
+            changed = true;
+          }
+          if (!updated.tkcsCode || updated.tkcsCode.startsWith('TKCS-') || updated.tkcsCode === 'TKCS') {
+            updated.tkcsCode = matchedCommune.tkcsCode;
+            changed = true;
+          }
+          if (!updated.tkcsName || updated.tkcsName === 'TKCS') {
+            updated.tkcsName = matchedCommune.tkcsName;
+            changed = true;
+          }
+        }
+
+        // 2. Khôi phục tên địa bàn (tên sheet)
+        const curName = (updated.areaName || '').trim();
         if (!curName || curName === 'Địa bàn' || curName === '---') {
           const matchedArea = areas.find(a => 
-            (h.areaId && a.id === h.areaId) || 
-            (a.code === h.areaCode && (!h.communeId || a.communeId === h.communeId || (a as any).communeCode === h.communeCode))
-          ) || areas.find(a => a.code === h.areaCode);
+            (updated.areaId && a.id === updated.areaId) || 
+            (a.code === updated.areaCode && (!updated.communeId || a.communeId === updated.communeId || (a as any).communeCode === updated.communeCode))
+          ) || areas.find(a => a.code === updated.areaCode);
 
           if (matchedArea?.name && matchedArea.name.trim() && matchedArea.name !== 'Địa bàn') {
-            hasHealed = true;
-            return { ...h, areaName: matchedArea.name.trim() };
-          } else if ((h as any).sheetName && (h as any).sheetName.trim()) {
-            hasHealed = true;
-            return { ...h, areaName: (h as any).sheetName.trim() };
+            updated.areaName = matchedArea.name.trim();
+            changed = true;
+          } else if ((updated as any).sheetName && (updated as any).sheetName.trim()) {
+            updated.areaName = (updated as any).sheetName.trim();
+            changed = true;
           }
+        }
+
+        if (changed) {
+          hasHealed = true;
+          return updated;
         }
         return h;
       });
@@ -589,7 +628,7 @@ export default function App() {
         }
       }
     }
-  }, [areas, households]);
+  }, [areas, communes, households]);
 
   // Tự động đồng bộ chọn xã theo danh mục xã vừa nạp hoặc đã có
   useEffect(() => {
@@ -697,20 +736,19 @@ export default function App() {
     });
   }, [areas, currentUser, selectedCommuneId, selectedTkcs, communes]);
 
-  // Lọc danh sách xã theo Bộ lọc dùng chung (TKCS, Xã, và từ khóa tìm kiếm)
+  // Lọc danh sách xã theo Bộ lọc dùng chung (TKCS và từ khóa tìm kiếm - giữ nguyên danh mục để người dùng tự do bấm chuyển xã)
   const filteredCommunesForImport = useMemo(() => {
     return communes.filter(c => {
       const matchTkcs = selectedTkcs === 'ALL' || c.tkcsCode === selectedTkcs;
-      const matchCommune = selectedCommuneId === 'ALL' || c.id === selectedCommuneId || c.communeCode === selectedCommuneId;
       const q = searchKeyword.trim().toLowerCase();
       const matchSearch = !q || 
         c.communeCode.toLowerCase().includes(q) || 
         c.communeName.toLowerCase().includes(q) || 
         (c.tkcsCode && c.tkcsCode.toLowerCase().includes(q)) ||
         (c.tkcsName && c.tkcsName.toLowerCase().includes(q));
-      return matchTkcs && matchCommune && matchSearch;
+      return matchTkcs && matchSearch;
     });
-  }, [communes, selectedTkcs, selectedCommuneId, searchKeyword]);
+  }, [communes, selectedTkcs, searchKeyword]);
 
   // Link trực tiếp từ Danh mục xã sang Tổng hợp nhanh số liệu điều tra (Tab 3)
   const handleViewCommuneTNH = (c: Commune) => {
@@ -1651,6 +1689,7 @@ export default function App() {
             communeCode: communeCodeFinal || detectedCommuneCode || '01',
             communeName: communeNameFinal || detectedCommuneName || 'Xã/Phường',
             areaName: areaNameFinal,
+            sheetName: areaNameFinal,
             sttMau: sttMauVal,
             sampleStatus: statusVal,
             sttGoc: sttGocVal,
@@ -1688,7 +1727,9 @@ export default function App() {
           ...h,
           id: 'hh-' + newCommuneId + '-' + areaCode + '-' + (hIdx + 1),
           areaId: areaId,
-          areaCode: areaCode
+          areaCode: areaCode,
+          areaName: areaNameFinal,
+          sheetName: areaNameFinal
         }));
 
         tempHouseholds.push(...finalizedHouseholds);
@@ -1759,7 +1800,9 @@ export default function App() {
         communeCode: targetCommune.communeCode,
         communeName: targetCommune.communeName,
         tkcsCode: targetCommune.tkcsCode,
-        tkcsName: targetCommune.tkcsName
+        tkcsName: targetCommune.tkcsName,
+        areaName: h.areaName || '',
+        sheetName: (h as any).sheetName || h.areaName || ''
       }));
 
       // Ghi đè / cập nhật trực tiếp danh sách hộ cho xã này
@@ -1773,12 +1816,11 @@ export default function App() {
         existingCommune ? [existingCommune.id] : []
       );
 
-      // Tự động chuyển chọn xã và địa bàn vừa nạp
+      // Hiển thị toàn bộ các hộ vừa nạp thuộc xã này, không giới hạn địa bàn đơn lẻ
       setSelectedCommuneId(targetCommuneId);
       setSelectedTkcs(targetCommune.tkcsCode || 'ALL');
-      if (finalizedAreas.length > 0) {
-        setSelectedAreaId(finalizedAreas[0].id);
-      }
+      setSelectedAreaId('ALL');
+      setCurrentPage(1);
 
     } catch (err) {
       console.error(err);
@@ -2014,6 +2056,7 @@ export default function App() {
             tkcsCode: commune.tkcsCode || '',
             tkcsName: commune.tkcsName || '',
             areaName: areaNameFinal,
+            sheetName: areaNameFinal,
             sttMau: sttMauVal,
             sampleStatus: statusVal,
             sttGoc: sttGocVal,
@@ -2044,7 +2087,8 @@ export default function App() {
           id: 'hh-' + commune.id + '-' + areaCode + '-' + (hIdx + 1),
           areaId: areaId,
           areaCode: areaCode,
-          areaName: areaNameFinal
+          areaName: areaNameFinal,
+          sheetName: areaNameFinal
         }));
 
         tempHouseholds.push(...finalizedHouseholds);
@@ -2081,11 +2125,11 @@ export default function App() {
         [commune.id]
       );
 
+      // Hiển thị toàn bộ các hộ vừa nạp thuộc xã này, không lọc theo địa bàn đơn lẻ
       setSelectedCommuneId(commune.id);
       setSelectedTkcs(commune.tkcsCode || 'ALL');
-      if (tempAreas.length > 0) {
-        setSelectedAreaId(tempAreas[0].id);
-      }
+      setSelectedAreaId('ALL');
+      setCurrentPage(1);
 
       showNotification('success', `Đã nạp thành công ${totalParsed} hộ cho [${commune.communeCode}] ${commune.communeName} (${tempAreas.length} địa bàn).`);
 
@@ -2097,30 +2141,76 @@ export default function App() {
     e.target.value = '';
   };
 
+  const currentCommune = useMemo(() => {
+    if (selectedCommuneId !== 'ALL') {
+      return communes.find(c => c.id === selectedCommuneId || c.communeCode === selectedCommuneId) || communes[0];
+    }
+    return communes[0];
+  }, [communes, selectedCommuneId]);
+
   const filteredHouseholds = useMemo(() => {
+    // Đối tượng xã đang chọn nếu có
+    const selCommune = selectedCommuneId !== 'ALL'
+      ? (communes.find(c => c.id === selectedCommuneId || c.communeCode === selectedCommuneId) || null)
+      : null;
+
+    // Đối tượng địa bàn đang chọn nếu có
+    const selArea = selectedAreaId !== 'ALL'
+      ? (areas.find(a => a.id === selectedAreaId || a.code === selectedAreaId) || null)
+      : null;
+
     return households.filter(h => {
-      if (selectedTkcs !== 'ALL' && h.tkcsCode !== selectedTkcs) return false;
-      if (selectedCommuneId !== 'ALL' && h.communeId !== selectedCommuneId) return false;
-      if (selectedAreaId !== 'ALL' && h.areaId !== selectedAreaId && h.areaCode !== selectedAreaId) return false;
+      // 1. Lọc theo TKCS (Chỉ áp dụng khi chưa lọc cụ thể theo Xã)
+      if (selectedTkcs !== 'ALL' && selectedCommuneId === 'ALL') {
+        const commOfH = communes.find(c => c.id === h.communeId || (c.communeCode && c.communeCode === h.communeCode));
+        const effectiveTkcs = (h.tkcsCode && !h.tkcsCode.startsWith('TKCS-') && h.tkcsCode !== 'TKCS') 
+          ? h.tkcsCode 
+          : (commOfH?.tkcsCode || h.tkcsCode || '');
+        const matchTkcs = effectiveTkcs === selectedTkcs || (commOfH && commOfH.tkcsCode === selectedTkcs);
+        if (!matchTkcs) return false;
+      }
+
+      // 2. Lọc theo Xã / Phường (Hỗ trợ linh hoạt cả communeId, communeCode và tên xã)
+      if (selectedCommuneId !== 'ALL') {
+        const selCode = selCommune?.communeCode || selectedCommuneId;
+        const matchesCommune = h.communeId === selectedCommuneId ||
+          (Boolean(h.communeCode) && (h.communeCode === selCode || (Boolean(selCommune) && h.communeCode === selCommune?.communeCode))) ||
+          (Boolean(selCommune) && (h.communeId === selCommune?.id || h.communeId === selCommune?.communeCode)) ||
+          (Boolean(selCommune?.communeName) && Boolean(h.communeName) && h.communeName.trim().toLowerCase() === selCommune!.communeName.trim().toLowerCase());
+        if (!matchesCommune) return false;
+      }
+
+      // 3. Lọc theo Địa bàn (Hỗ trợ cả areaId, areaCode và tên địa bàn/sheet)
+      if (selectedAreaId !== 'ALL') {
+        const targetAreaCode = selArea?.code || selectedAreaId;
+        const matchesArea = h.areaId === selectedAreaId ||
+          h.areaCode === targetAreaCode ||
+          (Boolean(selArea) && (
+            h.areaId === selArea?.id || 
+            h.areaCode === selArea?.code ||
+            (Boolean(selArea?.name) && Boolean(h.areaName) && h.areaName.trim().toLowerCase() === selArea!.name.trim().toLowerCase()) ||
+            (Boolean(selArea?.name) && Boolean((h as any).sheetName) && (h as any).sheetName.trim().toLowerCase() === selArea!.name.trim().toLowerCase())
+          ));
+        if (!matchesArea) return false;
+      }
       
-      // STRICT ROLE-BASED ACCESS CONTROL
-      if (currentUser) {
+      // 4. Role-based access control (chỉ áp dụng khi không phải ADMIN)
+      if (currentUser && currentUser.role !== 'ADMIN') {
         if (currentUser.role === 'SURVEYOR') {
-          // SURVEYOR can strictly only access households in their assigned areas or directly assigned to them
           const isDirect = h.assignedSurveyorId === currentUser.id;
           const isAreaMatch = currentUser.assignedAreas.includes('ALL') || currentUser.assignedAreas.includes(h.areaCode);
           if (!isDirect && !isAreaMatch) return false;
         } else if (currentUser.role === 'SUPERVISOR') {
-          // SUPERVISOR can strictly only access households in their assigned communes
           if (currentUser.assignedCommunes && !currentUser.assignedCommunes.includes('ALL')) {
             const matchesCommune = currentUser.assignedCommunes.includes(h.communeId) || 
-                                   (Boolean(h.communeCode) && currentUser.assignedCommunes.includes(h.communeCode));
+                                   (Boolean(h.communeCode) && currentUser.assignedCommunes.includes(h.communeCode)) ||
+                                   communes.some(c => (currentUser.assignedCommunes?.includes(c.id) || currentUser.assignedCommunes?.includes(c.communeCode)) && (c.id === h.communeId || c.communeCode === h.communeCode));
             if (!matchesCommune) return false;
           }
         }
       }
 
-      // Filter by assigned surveyor
+      // 5. Lọc theo người nhập / ĐTV
       if (selectedSurveyorFilter !== 'ALL') {
         if (selectedSurveyorFilter === 'UNASSIGNED') {
           if (h.assignedSurveyorId) return false;
@@ -2129,13 +2219,13 @@ export default function App() {
         }
       }
 
-      // Filter by survey status
+      // 6. Lọc theo trạng thái phiếu
       if (selectedStatusFilter !== 'ALL') {
         const status = h.surveyStatus || 'CHUA_NHAP';
         if (status !== selectedStatusFilter) return false;
       }
 
-      // Filter by economic sector (1-4)
+      // 7. Lọc theo ngành kinh tế (1-4)
       if (selectedSectorFilter !== 'ALL') {
         const secCode = String(h.sectorCode || '');
         const secFilter = String(selectedSectorFilter);
@@ -2155,6 +2245,7 @@ export default function App() {
         }
       }
 
+      // 8. Tìm kiếm từ khóa đa trường
       if (searchKeyword.trim()) {
         const kw = searchKeyword.toLowerCase().trim();
         const head = (h.householdHead || '').toLowerCase();
@@ -2162,20 +2253,35 @@ export default function App() {
         const note = (h.note || '').toLowerCase();
         const area = (h.areaName || '').toLowerCase();
         const sName = (h.assignedSurveyorName || '').toLowerCase();
-        if (!head.includes(kw) && !addr.includes(kw) && !note.includes(kw) && !area.includes(kw) && !sName.includes(kw)) {
+        const sttM = String(h.sttMau || '').toLowerCase();
+        const sttG = String(h.sttGoc || '').toLowerCase();
+        if (!head.includes(kw) && !addr.includes(kw) && !note.includes(kw) && !area.includes(kw) && !sName.includes(kw) && !sttM.includes(kw) && !sttG.includes(kw)) {
           return false;
         }
       }
+
+      // 9. Lọc chỉ hộ tôi phụ trách
+      if (onlyMyHouseholds && currentUser) {
+        const isMine = h.assignedSurveyorId === currentUser.id || currentUser.assignedAreas.includes('ALL') || currentUser.assignedAreas.includes(h.areaCode);
+        if (!isMine) return false;
+      }
+
       return true;
     });
-  }, [households, selectedTkcs, selectedCommuneId, selectedAreaId, searchKeyword, onlyMyHouseholds, selectedSurveyorFilter, selectedStatusFilter, selectedSectorFilter, currentUser]);
-
-  const currentCommune = useMemo(() => {
-    if (selectedCommuneId !== 'ALL') {
-      return communes.find(c => c.id === selectedCommuneId) || communes[0];
-    }
-    return communes[0];
-  }, [communes, selectedCommuneId]);
+  }, [
+    households, 
+    communes, 
+    areas, 
+    selectedTkcs, 
+    selectedCommuneId, 
+    selectedAreaId, 
+    searchKeyword, 
+    onlyMyHouseholds, 
+    selectedSurveyorFilter, 
+    selectedStatusFilter, 
+    selectedSectorFilter, 
+    currentUser
+  ]);
 
   const calculateHouseholdTotalIncome = (h: Household) => {
     return calculateFullIncome(h.questionnaire);
@@ -3637,21 +3743,25 @@ export default function App() {
             <tbody>
               {paginatedHouseholds.map((h, idx) => {
                 const inc = calculateHouseholdTotalIncome(h);
-                const tkcsCodeDisplay = h.tkcsCode || currentCommune?.tkcsCode || formTkcsCode || '';
-                const tkcsNameDisplay = h.tkcsName || currentCommune?.tkcsName || formTkcsName || '';
-                const communeCodeDisplay = h.communeCode || currentCommune?.communeCode || formCommuneCode || '';
-                const communeNameDisplay = h.communeName || currentCommune?.communeName || formCommuneName || '';
+                const hCommune = communes.find(c => c.id === h.communeId || (Boolean(h.communeCode) && c.communeCode === h.communeCode));
+                const tkcsCodeDisplay = h.tkcsCode || hCommune?.tkcsCode || '';
+                const tkcsNameDisplay = h.tkcsName || hCommune?.tkcsName || '';
+                const communeCodeDisplay = h.communeCode || hCommune?.communeCode || '';
+                const communeNameDisplay = h.communeName || hCommune?.communeName || '';
                 const matchedArea = areas.find(a => 
                   (h.areaId && a.id === h.areaId) || 
                   (h.areaCode && a.code === h.areaCode && (!h.communeId || !a.communeId || a.communeId === h.communeId)) ||
                   (h.areaCode && a.code === h.areaCode)
                 );
                 const areaCodeDisplay = h.areaCode || matchedArea?.code || '001';
+                // Tên địa bàn: ưu tiên tên đã lưu hoặc tên sheet (nếu có), kế tiếp tên địa bàn khớp trong danh mục, nếu trống dùng Địa bàn [mã]
                 const areaNameDisplay = (h.areaName && h.areaName.trim() && h.areaName !== 'Địa bàn') 
                   ? h.areaName.trim() 
+                  : ((h as any).sheetName && (h as any).sheetName.trim() && (h as any).sheetName !== 'Địa bàn')
+                  ? (h as any).sheetName.trim()
                   : (matchedArea?.name && matchedArea.name.trim() && matchedArea.name !== 'Địa bàn')
                   ? matchedArea.name.trim()
-                  : ((h as any).sheetName || (h.areaCode ? `Địa bàn ${h.areaCode}` : '---'));
+                  : (h.areaCode ? `Địa bàn ${h.areaCode}` : '---');
                 const isRowSelected = selectedHouseholdIds.includes(h.id);
                 const status = h.surveyStatus || 'CHUA_NHAP';
                 const isLocked = status === 'DA_DUYET' && currentUser?.role !== 'ADMIN';
@@ -3788,8 +3898,21 @@ export default function App() {
               })}
               {paginatedHouseholds.length === 0 && (
                 <tr>
-                  <td colSpan={showEntryButton ? 20 : 19} className="text-center py-10 text-slate-500 italic">
-                    Không tìm thấy hộ gia đình nào theo tiêu chí lọc hiện tại.
+                  <td colSpan={showEntryButton ? 20 : 19} className="text-center py-10 text-slate-500">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <AlertCircle className="w-8 h-8 text-amber-500" />
+                      <span className="font-bold text-slate-700">Không tìm thấy hộ gia đình nào theo tiêu chí lọc hiện tại.</span>
+                      {households.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleResetFilters}
+                          className="mt-2 px-3 py-1.5 bg-sky-700 hover:bg-sky-600 active:bg-sky-800 text-white rounded font-bold cursor-pointer shadow-xs flex items-center gap-1.5 transition-colors"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>Đặt lại bộ lọc để xem toàn bộ {households.length} hộ</span>
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               )}
@@ -3818,6 +3941,7 @@ export default function App() {
                 <option value={50}>50 hộ</option>
                 <option value={100}>100 hộ</option>
                 <option value={200}>200 hộ</option>
+                <option value={500}>500 hộ</option>
                 <option value={-1}>Tất cả ({totalItems} hộ)</option>
               </select>
             </div>
@@ -4200,7 +4324,12 @@ export default function App() {
                   const val = e.target.value;
                   setSelectedTkcs(val);
                   setTnhSelectedTkcs(val);
-                  if (val !== 'ALL') {
+                  if (val === 'ALL') {
+                    // Khi chọn Tất cả TKCS -> reset Xã và Địa bàn về Tất cả
+                    setSelectedCommuneId('ALL');
+                    setTnhSelectedCommuneId('ALL');
+                    setSelectedAreaId('ALL');
+                  } else {
                     const currentObj = availableFilterCommunes.find(c => c.id === selectedCommuneId);
                     if (currentObj && currentObj.tkcsCode !== val) {
                       setSelectedCommuneId('ALL');
@@ -4208,6 +4337,7 @@ export default function App() {
                       setSelectedAreaId('ALL');
                     }
                   }
+                  setCurrentPage(1);
                 }}
                 className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
               >
@@ -4230,13 +4360,18 @@ export default function App() {
                   setSelectedCommuneId(val);
                   setTnhSelectedCommuneId(val);
                   setSelectedAreaId('ALL');
-                  if (val !== 'ALL') {
+                  if (val === 'ALL') {
+                    // Khi chọn Tất cả Xã -> reset TKCS về Tất cả để người dùng xem toàn bộ 104 xã và tất cả hộ
+                    setSelectedTkcs('ALL');
+                    setTnhSelectedTkcs('ALL');
+                  } else {
                     const comm = availableFilterCommunes.find(c => c.id === val);
                     if (comm?.tkcsCode) {
                       setSelectedTkcs(comm.tkcsCode);
                       setTnhSelectedTkcs(comm.tkcsCode);
                     }
                   }
+                  setCurrentPage(1);
                 }}
                 className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
               >
@@ -4256,7 +4391,10 @@ export default function App() {
               <span className="font-bold text-slate-700">Địa bàn:</span>
               <select 
                 value={selectedAreaId} 
-                onChange={e => setSelectedAreaId(e.target.value)}
+                onChange={e => {
+                  setSelectedAreaId(e.target.value);
+                  setCurrentPage(1);
+                }}
                 className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
               >
                 <option value="ALL">Tất cả</option>
@@ -4273,7 +4411,10 @@ export default function App() {
               <span className="font-bold text-slate-700">Ngành:</span>
               <select 
                 value={selectedSectorFilter} 
-                onChange={e => setSelectedSectorFilter(e.target.value)}
+                onChange={e => {
+                  setSelectedSectorFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
                 className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
               >
                 <option value="ALL">Tất cả</option>
@@ -4291,13 +4432,19 @@ export default function App() {
                 type="text" 
                 placeholder="Tìm chủ hộ, xã, ĐB..." 
                 value={searchKeyword}
-                onChange={e => setSearchKeyword(e.target.value)}
+                onChange={e => {
+                  setSearchKeyword(e.target.value);
+                  setCurrentPage(1);
+                }}
                 className="bg-transparent border-none text-xs focus:outline-none w-36 font-medium text-slate-800"
               />
               {searchKeyword && (
                 <button
                   type="button"
-                  onClick={() => setSearchKeyword('')}
+                  onClick={() => {
+                    setSearchKeyword('');
+                    setCurrentPage(1);
+                  }}
                   className="text-slate-400 hover:text-slate-600 font-bold px-1"
                 >
                   ✕
@@ -4305,22 +4452,15 @@ export default function App() {
               )}
             </div>
 
-            {(selectedTkcs !== 'ALL' || selectedCommuneId !== 'ALL' || selectedAreaId !== 'ALL' || selectedSectorFilter !== 'ALL' || searchKeyword) && (
+            {(selectedTkcs !== 'ALL' || selectedCommuneId !== 'ALL' || selectedAreaId !== 'ALL' || selectedSectorFilter !== 'ALL' || selectedSurveyorFilter !== 'ALL' || selectedStatusFilter !== 'ALL' || searchKeyword.trim() !== '' || onlyMyHouseholds) && (
               <button
                 type="button"
-                onClick={() => {
-                  setSelectedTkcs('ALL');
-                  setTnhSelectedTkcs('ALL');
-                  setSelectedCommuneId('ALL');
-                  setTnhSelectedCommuneId('ALL');
-                  setSelectedAreaId('ALL');
-                  setSelectedSectorFilter('ALL');
-                  setSearchKeyword('');
-                }}
-                className="text-sky-700 hover:text-sky-900 font-bold text-xs underline cursor-pointer ml-1"
-                title="Xóa bộ lọc để xem toàn bộ dữ liệu"
+                onClick={handleResetFilters}
+                className="h-8 px-2.5 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs transition-colors"
+                title="Xóa toàn bộ bộ lọc để xem toàn bộ danh sách hộ đã nạp"
               >
-                Đặt lại lọc
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Bỏ lọc (Hiện tất cả {households.length} hộ)</span>
               </button>
             )}
           </div>
@@ -4400,15 +4540,23 @@ export default function App() {
                         const communeAreas = areas.filter(a => a.communeId === c.id || (Boolean(c.communeCode) && (a as any).communeCode === c.communeCode));
                         const areaCount = communeAreas.length;
                         const isLoaded = hhCount > 0;
-                        const isSelected = selectedCommuneId === c.id || (Boolean(c.communeCode) && currentCommune?.communeCode === c.communeCode);
+                        const isSelected = selectedCommuneId !== 'ALL' && (selectedCommuneId === c.id || (Boolean(c.communeCode) && selectedCommuneId === c.communeCode));
 
                         return (
                           <tr 
                             key={c.id || c.communeCode} 
                             onClick={() => {
-                              setSelectedCommuneId(c.id);
-                              setSelectedTkcs(c.tkcsCode || 'ALL');
-                              setSelectedAreaId('ALL');
+                              if (selectedCommuneId === c.id || (Boolean(c.communeCode) && selectedCommuneId === c.communeCode)) {
+                                // Click lại dòng đang chọn -> Bỏ chọn để xem toàn bộ tất cả hộ
+                                setSelectedCommuneId('ALL');
+                                setSelectedTkcs('ALL');
+                                setSelectedAreaId('ALL');
+                              } else {
+                                setSelectedCommuneId(c.id);
+                                setSelectedTkcs(c.tkcsCode || 'ALL');
+                                setSelectedAreaId('ALL');
+                              }
+                              setCurrentPage(1);
                             }}
                             className={`transition-colors cursor-pointer hover:bg-[#e6f6f8] ${
                               isSelected 
@@ -4474,7 +4622,40 @@ export default function App() {
             </div>
 
             {/* BẢNG KÊ DANH SÁCH HỘ ĐIỀU TRA */}
-            <div>
+            <div className="flex flex-col gap-2">
+              <div className="bg-sky-50 border border-sky-300 rounded px-3.5 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="font-extrabold text-sky-950 flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-sky-700" />
+                    <span>
+                      {selectedCommuneId === 'ALL'
+                        ? `Danh sách Bảng kê Hộ mẫu: Hiển thị toàn bộ ${filteredHouseholds.length} / ${households.length} hộ (Tất cả 104 xã, không lọc)`
+                        : `Danh sách Bảng kê Hộ mẫu: Đang lọc theo Xã [${communes.find(c => c.id === selectedCommuneId)?.communeCode || selectedCommuneId}] ${communes.find(c => c.id === selectedCommuneId)?.communeName || ''} (${filteredHouseholds.length} hộ)`}
+                    </span>
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {selectedCommuneId !== 'ALL' ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedCommuneId('ALL');
+                        setSelectedTkcs('ALL');
+                        setSelectedAreaId('ALL');
+                        setCurrentPage(1);
+                      }}
+                      className="px-2.5 py-1 bg-sky-800 hover:bg-sky-700 active:bg-sky-900 text-white rounded font-bold cursor-pointer transition-all shadow-2xs flex items-center gap-1"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      <span>Xem toàn bộ {households.length} hộ (Bỏ lọc xã)</span>
+                    </button>
+                  ) : (
+                    <span className="text-slate-500 font-medium italic">
+                      💡 Bấm vào dòng xã ở bảng trên để lọc theo từng xã, hoặc bấm lại để xem tất cả
+                    </span>
+                  )}
+                </div>
+              </div>
               {renderHouseholdTable(true, 'max-h-[350px]')}
             </div>
 
@@ -4488,12 +4669,24 @@ export default function App() {
               <div>
                 <h2 className="font-bold text-slate-800 text-sm uppercase flex items-center gap-2">
                   <FileText className="w-4 h-4 text-sky-800" />
-                  <span>Danh sách Bảng kê Hộ mẫu & Nhập tin chi tiết Phụ lục II ({filteredHouseholds.length} hộ)</span>
+                  <span>Danh sách Bảng kê Hộ mẫu & Nhập tin chi tiết Phụ lục II ({filteredHouseholds.length} / {households.length} hộ)</span>
                 </h2>
                 <p className="text-xs text-slate-600 mt-0.5">
-                  Phân công điều tra viên, theo dõi tiến độ nhập và bấm "Nhập tin phiếu" tại từng hộ để hoàn thiện phiếu thu thập.
+                  Phân công điều tra viên, theo dõi tiến độ nhập, bấm "Thay hộ mẫu" để thay thế hộ dự phòng cùng địa bàn hoặc "Nhập tin phiếu" tại từng hộ.
                 </p>
               </div>
+
+              {(selectedTkcs !== 'ALL' || selectedCommuneId !== 'ALL' || selectedAreaId !== 'ALL' || selectedSectorFilter !== 'ALL' || selectedSurveyorFilter !== 'ALL' || selectedStatusFilter !== 'ALL' || searchKeyword.trim() !== '' || onlyMyHouseholds) && (
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors self-start md:self-auto"
+                  title="Bỏ toàn bộ các tiêu chí lọc để hiển thị danh sách đầy đủ toàn bộ hộ"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Hiện tất cả {households.length} hộ (Bỏ lọc)</span>
+                </button>
+              )}
             </div>
 
             {/* Advanced Filters for Surveyor & Survey Status */}

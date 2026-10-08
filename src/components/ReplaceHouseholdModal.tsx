@@ -108,10 +108,14 @@ export const ReplaceHouseholdModal: React.FC<ReplaceHouseholdModalProps> = ({
     return allHouseholds.filter(h => {
       if (h.id === householdToReplace.id) return false;
       const sameArea = (h.areaId && householdToReplace.areaId && h.areaId === householdToReplace.areaId) ||
-        (h.areaCode === householdToReplace.areaCode && (
+        (Boolean(h.areaCode) && Boolean(householdToReplace.areaCode) && h.areaCode === householdToReplace.areaCode && (
           !h.communeId || !householdToReplace.communeId || h.communeId === householdToReplace.communeId ||
           !h.communeCode || !householdToReplace.communeCode || h.communeCode === householdToReplace.communeCode
-        ));
+        )) ||
+        (Boolean(h.areaName) && Boolean(householdToReplace.areaName) && h.areaName !== 'Địa bàn' && householdToReplace.areaName !== 'Địa bàn' && h.areaName.trim().toLowerCase() === householdToReplace.areaName.trim().toLowerCase() && (
+          !h.communeId || !householdToReplace.communeId || h.communeId === householdToReplace.communeId
+        )) ||
+        (Boolean((h as any).sheetName) && Boolean((householdToReplace as any).sheetName) && (h as any).sheetName.trim().toLowerCase() === (householdToReplace as any).sheetName.trim().toLowerCase());
       return sameArea;
     });
   }, [allHouseholds, householdToReplace]);
