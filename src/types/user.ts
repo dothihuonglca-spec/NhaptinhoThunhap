@@ -15,6 +15,7 @@ export interface Department {
   leaderName?: string; // Trưởng phòng / Cán bộ phụ trách
   leaderPhone?: string;
   assignedAreaCodes: string[]; // Danh sách mã địa bàn phân công cho phòng ban này
+  assignedCommuneCodes?: string[]; // Danh sách mã hoặc ID xã phân công cho phòng ban này
   colorTheme?: string;
   createdAt?: string;
   updatedAt?: string;
@@ -34,6 +35,7 @@ export interface Surveyor {
   email?: string; // Email tài khoản
   role: UserRole; // ADMIN, SURVEYOR, SUPERVISOR
   assignedAreas: string[]; // Mảng mã địa bàn: ['001', '002'] hoặc ['ALL']
+  assignedCommunes?: string[]; // Mảng mã hoặc ID xã phân công cho Giám sát viên: ['001', '002'] hoặc ['ALL']
   status: 'ACTIVE' | 'LOCKED'; // ACTIVE, LOCKED
   mustChangePassword?: boolean; // Bắt buộc đổi mật khẩu khi đăng nhập lần đầu / sau khi admin reset
   lastPasswordChange?: string; // Thời gian đổi mật khẩu gần nhất

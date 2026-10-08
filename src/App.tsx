@@ -203,6 +203,21 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(50);
 
+  const handleResetFilters = () => {
+    setSelectedTkcs('ALL');
+    setTnhSelectedTkcs('ALL');
+    setSelectedCommuneId('ALL');
+    setTnhSelectedCommuneId('ALL');
+    setSelectedAreaId('ALL');
+    setSelectedSurveyorFilter('ALL');
+    setSelectedStatusFilter('ALL');
+    setSelectedSectorFilter('ALL');
+    setSearchKeyword('');
+    setOnlyMyHouseholds(false);
+    setSelectedHouseholdIds([]);
+    setCurrentPage(1);
+  };
+
   // Upload Report Modal for skipped / invalid sheets
   const [uploadReport, setUploadReport] = useState<{
     validCount: number;
@@ -557,6 +572,59 @@ export default function App() {
     });
     return Array.from(map.values()).sort((a, b) => a.code.localeCompare(b.code));
   }, [communes]);
+
+  // Bộ lọc thông minh được phân quyền theo vai trò (Để không thể chọn ngoài phân công)
+  const availableFilterCommunes = useMemo(() => {
+    if (!currentUser) return communes;
+    if (currentUser.role === 'SUPERVISOR') {
+      if (currentUser.assignedCommunes && !currentUser.assignedCommunes.includes('ALL')) {
+        return communes.filter(c => currentUser.assignedCommunes?.includes(c.id) || currentUser.assignedCommunes?.includes(c.communeCode));
+      }
+    } else if (currentUser.role === 'SURVEYOR') {
+      if (!currentUser.assignedAreas.includes('ALL')) {
+        const myCommuneIds = new Set(areas.filter(a => currentUser.assignedAreas.includes(a.code)).map(a => a.communeId));
+        return communes.filter(c => myCommuneIds.has(c.id) || myCommuneIds.has(c.communeCode));
+      }
+    }
+    return communes;
+  }, [communes, areas, currentUser]);
+
+  const availableFilterTkcs = useMemo(() => {
+    const comms = availableFilterCommunes;
+    const tkcsCodes = new Set(comms.map(c => c.tkcsCode));
+    return uniqueTkcsList.filter(tk => tkcsCodes.has(tk.code));
+  }, [uniqueTkcsList, availableFilterCommunes]);
+
+  const availableFilterAreas = useMemo(() => {
+    let result = areas;
+    if (currentUser) {
+      if (currentUser.role === 'SURVEYOR') {
+        if (!currentUser.assignedAreas.includes('ALL')) {
+          result = areas.filter(a => currentUser.assignedAreas.includes(a.code));
+        }
+      } else if (currentUser.role === 'SUPERVISOR') {
+        if (currentUser.assignedCommunes && !currentUser.assignedCommunes.includes('ALL')) {
+          result = areas.filter(a => currentUser.assignedCommunes?.includes(a.communeId) || ((a as any).communeCode && currentUser.assignedCommunes?.includes((a as any).communeCode)));
+        }
+      }
+    }
+
+    const activeCommune = selectedCommuneId !== 'ALL' 
+      ? communes.find(c => c.id === selectedCommuneId) 
+      : null;
+
+    // Áp dụng bộ lọc Xã và TKCS hiện tại
+    return result.filter(a => {
+      if (selectedCommuneId !== 'ALL') {
+        return a.communeId === selectedCommuneId || (Boolean(activeCommune?.communeCode) && (a as any).communeCode === activeCommune?.communeCode);
+      }
+      if (selectedTkcs !== 'ALL') {
+        const comm = communes.find(c => c.id === a.communeId || c.communeCode === (a as any).communeCode);
+        return comm?.tkcsCode === selectedTkcs;
+      }
+      return true;
+    });
+  }, [areas, currentUser, selectedCommuneId, selectedTkcs, communes]);
 
   // Lọc danh sách xã theo Bộ lọc dùng chung (TKCS, Xã, và từ khóa tìm kiếm)
   const filteredCommunesForImport = useMemo(() => {
@@ -1962,12 +2030,20 @@ export default function App() {
       if (selectedCommuneId !== 'ALL' && h.communeId !== selectedCommuneId) return false;
       if (selectedAreaId !== 'ALL' && h.areaId !== selectedAreaId && h.areaCode !== selectedAreaId) return false;
       
-      // Filter by "Only my households"
-      if (onlyMyHouseholds && currentUser) {
+      // STRICT ROLE-BASED ACCESS CONTROL
+      if (currentUser) {
         if (currentUser.role === 'SURVEYOR') {
+          // SURVEYOR can strictly only access households in their assigned areas or directly assigned to them
           const isDirect = h.assignedSurveyorId === currentUser.id;
           const isAreaMatch = currentUser.assignedAreas.includes('ALL') || currentUser.assignedAreas.includes(h.areaCode);
           if (!isDirect && !isAreaMatch) return false;
+        } else if (currentUser.role === 'SUPERVISOR') {
+          // SUPERVISOR can strictly only access households in their assigned communes
+          if (currentUser.assignedCommunes && !currentUser.assignedCommunes.includes('ALL')) {
+            const matchesCommune = currentUser.assignedCommunes.includes(h.communeId) || 
+                                   (Boolean(h.communeCode) && currentUser.assignedCommunes.includes(h.communeCode));
+            if (!matchesCommune) return false;
+          }
         }
       }
 
@@ -2070,20 +2146,24 @@ export default function App() {
       }
     }
 
-    // Nếu người nhập tin (SURVEYOR) đang bật chế độ chỉ xem xã/địa bàn phụ trách
-    if (currentUser?.role === 'SURVEYOR' && tnhSurveyorOnlyMine) {
-      const myAssignedCommuneCodes = new Set(
-        households
-          .filter(h => h.assignedSurveyorId === currentUser.id || currentUser.assignedAreas.includes('ALL') || currentUser.assignedAreas.includes(h.areaCode))
-          .map(h => h.communeCode)
-      );
-      if (myAssignedCommuneCodes.size > 0) {
-        result = result.filter(c => myAssignedCommuneCodes.has(c.communeCode));
+    // STRICT ROLE-BASED ACCESS CONTROL FOR TNH SCOPE
+    if (currentUser) {
+      if (currentUser.role === 'SUPERVISOR' && currentUser.assignedCommunes && !currentUser.assignedCommunes.includes('ALL')) {
+        result = result.filter(c => currentUser.assignedCommunes?.includes(c.id) || currentUser.assignedCommunes?.includes(c.communeCode));
+      } else if (currentUser.role === 'SURVEYOR') {
+        const myAssignedCommuneCodes = new Set(
+          households
+            .filter(h => h.assignedSurveyorId === currentUser.id || currentUser.assignedAreas.includes('ALL') || currentUser.assignedAreas.includes(h.areaCode))
+            .map(h => h.communeCode)
+        );
+        if (myAssignedCommuneCodes.size > 0) {
+          result = result.filter(c => myAssignedCommuneCodes.has(c.communeCode));
+        }
       }
     }
 
     return result;
-  }, [communes, households, tnhScopeMode, tnhSelectedCommuneId, selectedCommuneId, tnhSelectedTkcs, selectedTkcs, currentUser, tnhSurveyorOnlyMine]);
+  }, [communes, households, tnhScopeMode, tnhSelectedCommuneId, selectedCommuneId, tnhSelectedTkcs, selectedTkcs, currentUser]);
 
   // Hộ gia đình thuộc phạm vi Tổng hợp nhanh đang xem
   const tnhScopeHouseholds = useMemo(() => {
@@ -2109,17 +2189,23 @@ export default function App() {
       list = list.filter(h => h.areaId === selectedAreaId || h.areaCode === selectedAreaId);
     }
 
-    // Nếu người nhập tin (SURVEYOR) đang bật chỉ xem địa bàn & xã phụ trách
-    if (currentUser?.role === 'SURVEYOR' && tnhSurveyorOnlyMine) {
-      list = list.filter(h => 
-        h.assignedSurveyorId === currentUser.id || 
-        currentUser.assignedAreas.includes('ALL') || 
-        currentUser.assignedAreas.includes(h.areaCode)
-      );
+    // STRICT ROLE-BASED ACCESS CONTROL FOR TNH HOUSEHOLDS
+    if (currentUser) {
+      if (currentUser.role === 'SUPERVISOR') {
+        if (currentUser.assignedCommunes && !currentUser.assignedCommunes.includes('ALL')) {
+          list = list.filter(h => currentUser.assignedCommunes?.includes(h.communeId) || (Boolean(h.communeCode) && currentUser.assignedCommunes?.includes(h.communeCode)));
+        }
+      } else if (currentUser.role === 'SURVEYOR') {
+        list = list.filter(h => 
+          h.assignedSurveyorId === currentUser.id || 
+          currentUser.assignedAreas.includes('ALL') || 
+          currentUser.assignedAreas.includes(h.areaCode)
+        );
+      }
     }
 
     return list;
-  }, [households, communes, tnhScopeMode, tnhSelectedCommuneId, selectedCommuneId, tnhSelectedTkcs, selectedTkcs, selectedAreaId, currentUser, tnhSurveyorOnlyMine]);
+  }, [households, communes, tnhScopeMode, tnhSelectedCommuneId, selectedCommuneId, tnhSelectedTkcs, selectedTkcs, selectedAreaId, currentUser]);
 
   // Tính toán Tổng hợp nhanh kết nối chuẩn xác Danh mục Xã / TKCS và Phiếu điều tra thực tế
   const tnhSummary = useMemo(() => {
@@ -2335,14 +2421,27 @@ export default function App() {
 
   const filteredCommunesTnhOverview = useMemo(() => {
     return communesTnhOverview.filter(item => {
-      // Khi là người nhập tin (SURVEYOR) và bật chỉ xem xã phụ trách
-      if (currentUser?.role === 'SURVEYOR' && tnhSurveyorOnlyMine) {
-        const hasMyHouseholds = households.some(h => 
-          (h.communeId === item.commune.id || h.communeCode === item.commune.communeCode) &&
-          (h.assignedSurveyorId === currentUser.id || currentUser.assignedAreas.includes('ALL') || currentUser.assignedAreas.includes(h.areaCode))
-        );
-        if (!hasMyHouseholds) return false;
+      // STRICT ROLE-BASED ACCESS CONTROL
+      if (currentUser) {
+        if (currentUser.role === 'SUPERVISOR') {
+          // SUPERVISOR can strictly only see their assigned communes
+          if (currentUser.assignedCommunes && !currentUser.assignedCommunes.includes('ALL')) {
+            const matchesCommune = currentUser.assignedCommunes.includes(item.commune.id) || 
+                                   currentUser.assignedCommunes.includes(item.commune.communeCode);
+            if (!matchesCommune) return false;
+          }
+        } else if (currentUser.role === 'SURVEYOR') {
+          // SURVEYOR can strictly only see communes that contain their assigned areas
+          if (!currentUser.assignedAreas.includes('ALL')) {
+            const hasMyAreas = areas.some(a => 
+              (a.communeId === item.commune.id || (a as any).communeCode === item.commune.communeCode) &&
+              currentUser.assignedAreas.includes(a.code)
+            );
+            if (!hasMyAreas) return false;
+          }
+        }
       }
+
       if (selectedTkcs !== 'ALL' && item.commune.tkcsCode !== selectedTkcs) return false;
       if (selectedCommuneId !== 'ALL' && item.commune.id !== selectedCommuneId && item.commune.communeCode !== selectedCommuneId) return false;
       if (searchKeyword.trim()) {
@@ -2354,7 +2453,7 @@ export default function App() {
       }
       return true;
     });
-  }, [communesTnhOverview, selectedTkcs, selectedCommuneId, searchKeyword, currentUser, tnhSurveyorOnlyMine, households]);
+  }, [communesTnhOverview, selectedTkcs, selectedCommuneId, searchKeyword, currentUser, households, areas]);
 
   // Tổng hợp chi tiết theo từng địa bàn và xã mà cán bộ / người nhập tin phụ trách
   const surveyorAssignedAreasSummary = useMemo(() => {
@@ -2679,6 +2778,7 @@ export default function App() {
     }
 
     // Login success
+    handleResetFilters();
     setCurrentSurveyorId(user.id);
     setIsLoggedIn(true);
     localStorage.setItem('is_user_authenticated', 'true');
@@ -2700,6 +2800,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    handleResetFilters();
     setIsLoggedIn(false);
     localStorage.setItem('is_user_authenticated', 'false');
     showNotification('success', 'Đã đăng xuất khỏi tài khoản.');
@@ -3864,7 +3965,7 @@ export default function App() {
                   setSelectedTkcs(val);
                   setTnhSelectedTkcs(val);
                   if (val !== 'ALL') {
-                    const currentObj = communes.find(c => c.id === selectedCommuneId);
+                    const currentObj = availableFilterCommunes.find(c => c.id === selectedCommuneId);
                     if (currentObj && currentObj.tkcsCode !== val) {
                       setSelectedCommuneId('ALL');
                       setTnhSelectedCommuneId('ALL');
@@ -3875,7 +3976,7 @@ export default function App() {
                 className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
               >
                 <option value="ALL">Tất cả</option>
-                {uniqueTkcsList.map(tk => (
+                {availableFilterTkcs.map(tk => (
                   <option key={tk.code} value={tk.code}>
                     [{tk.code}] {tk.name}
                   </option>
@@ -3894,7 +3995,7 @@ export default function App() {
                   setTnhSelectedCommuneId(val);
                   setSelectedAreaId('ALL');
                   if (val !== 'ALL') {
-                    const comm = communes.find(c => c.id === val);
+                    const comm = availableFilterCommunes.find(c => c.id === val);
                     if (comm?.tkcsCode) {
                       setSelectedTkcs(comm.tkcsCode);
                       setTnhSelectedTkcs(comm.tkcsCode);
@@ -3904,7 +4005,7 @@ export default function App() {
                 className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
               >
                 <option value="ALL">Tất cả</option>
-                {communes
+                {availableFilterCommunes
                   .filter(c => selectedTkcs === 'ALL' || c.tkcsCode === selectedTkcs)
                   .map(c => (
                     <option key={c.id} value={c.id}>
@@ -3923,22 +4024,11 @@ export default function App() {
                 className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
               >
                 <option value="ALL">Tất cả</option>
-                {areas
-                  .filter(a => {
-                    if (selectedCommuneId !== 'ALL') {
-                      return a.communeId === selectedCommuneId || (Boolean(currentCommune?.communeCode) && (a as any).communeCode === currentCommune?.communeCode);
-                    }
-                    if (selectedTkcs !== 'ALL') {
-                      const comm = communes.find(c => c.id === a.communeId || c.communeCode === (a as any).communeCode);
-                      return comm?.tkcsCode === selectedTkcs;
-                    }
-                    return true;
-                  })
-                  .map(a => (
-                    <option key={a.id} value={a.id}>
-                      ĐB {a.code} - {a.name}
-                    </option>
-                  ))}
+                {availableFilterAreas.map(a => (
+                  <option key={a.id} value={a.id}>
+                    ĐB {a.code} - {a.name}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -4354,6 +4444,78 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+            {/* SURVEYOR PERSONAL PROGRESS SUMMARY BANNER & BREAKDOWN BY COMMUNE AND AREA */}
+            {currentUser?.role === 'SUPERVISOR' && (
+              <div className="bg-gradient-to-br from-amber-950 via-slate-900 to-amber-950 rounded-lg p-4 text-white shadow-md border border-amber-700/60 flex flex-col gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-700/40 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <span className="px-2.5 py-1 rounded bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider shadow-2xs">
+                      TIẾN ĐỘ GIÁM SÁT XÃ PHỤ TRÁCH
+                    </span>
+                    <h3 className="font-black text-sm md:text-base text-white flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-amber-300 animate-pulse" />
+                      <span>{currentUser.name} ({currentUser.code}) - {currentUser.department}</span>
+                    </h3>
+                  </div>
+                  <div className="text-xs text-amber-200 font-bold">
+                    Quyền giám sát: {currentUser.assignedCommunes?.includes('ALL') || !currentUser.assignedCommunes || currentUser.assignedCommunes.length === 0 ? 'Toàn bộ các xã' : `Phụ trách ${currentUser.assignedCommunes.length} xã`}
+                  </div>
+                </div>
+
+                {(() => {
+                  // Gather all households belonging to communes supervised by this supervisor
+                  const supervisedHHs = households.filter(h => {
+                    if (!currentUser.assignedCommunes || currentUser.assignedCommunes.includes('ALL') || currentUser.assignedCommunes.length === 0) return true;
+                    return currentUser.assignedCommunes.includes(h.communeId) || (Boolean(h.communeCode) && currentUser.assignedCommunes.includes(h.communeCode));
+                  });
+                  const totalAssigned = supervisedHHs.length;
+                  const totalSurveyed = supervisedHHs.filter(h => h.surveyStatus === 'DA_HOAN_THANH' || h.surveyStatus === 'DA_DUYET').length;
+                  const totalRemaining = Math.max(0, totalAssigned - totalSurveyed);
+                  
+                  // Calculate member and income details of supervised households
+                  let totalMembers = 0;
+                  let totalIncome = 0;
+                  supervisedHHs.forEach(h => {
+                    if (h.surveyStatus === 'DA_HOAN_THANH' || h.surveyStatus === 'DA_DUYET') {
+                      const inc = calculateHouseholdTotalIncome(h);
+                      totalIncome += inc.total;
+                      if (h.questionnaire?.muc1_rows) {
+                        totalMembers += h.questionnaire.muc1_rows.length;
+                      }
+                    }
+                  });
+                  
+                  const overallTnbq = totalMembers > 0 ? Math.round(totalIncome / totalMembers / 12) : 0;
+                  const overallPercent = totalAssigned > 0 ? Math.round((totalSurveyed / totalAssigned) * 100) : 0;
+
+                  return (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
+                        <span className="text-amber-200 block text-[11px]">Tổng số hộ thuộc các xã giám sát:</span>
+                        <strong className="text-lg font-black text-white">{totalAssigned} hộ</strong>
+                        <span className="block text-[10px] text-amber-300 mt-0.5">({Array.from(new Set(supervisedHHs.map(h => h.communeCode))).length} xã có dữ liệu)</span>
+                      </div>
+                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
+                        <span className="text-emerald-200 block text-[11px]">Đã khảo sát / Đã duyệt:</span>
+                        <strong className="text-lg font-black text-emerald-300">{totalSurveyed} / {totalAssigned} hộ ({overallPercent}%)</strong>
+                        <span className="block text-[10px] text-emerald-300 mt-0.5">Còn lại cần rà soát: {totalRemaining} hộ</span>
+                      </div>
+                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
+                        <span className="text-sky-200 block text-[11px]">Nhân khẩu đã nhập tin:</span>
+                        <strong className="text-lg font-black text-sky-200">{totalMembers} người</strong>
+                        <span className="block text-[10px] text-sky-300 mt-0.5">Thu nhập tích lũy: {totalIncome.toLocaleString()} (kđ)</span>
+                      </div>
+                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
+                        <span className="text-amber-200 block text-[11px]">TNBQ bình quân tháng:</span>
+                        <strong className="text-lg font-black text-amber-300">{overallTnbq > 0 ? `${overallTnbq.toLocaleString()} đ` : '0 đ'}</strong>
+                        <span className="block text-[10px] text-amber-200 mt-0.5">đ/người/tháng</span>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
 
             {/* SURVEYOR PERSONAL PROGRESS SUMMARY BANNER & BREAKDOWN BY COMMUNE AND AREA */}
             {(currentUser?.role === 'SURVEYOR' || currentUser?.role === 'ADMIN') && surveyorAssignedAreasSummary.length > 0 && (
@@ -5543,6 +5705,7 @@ export default function App() {
             surveyors={surveyors}
             departments={departments}
             areas={areas}
+            communes={communes}
             households={households}
             currentUser={currentUser}
             onSaveSurveyor={handleSaveSurveyor}
@@ -5552,6 +5715,7 @@ export default function App() {
             onBatchAssignArea={handleBatchAssignArea}
             onBatchAssignDepartmentArea={handleBatchAssignDepartmentArea}
             onSelectActiveUser={(s) => {
+              handleResetFilters();
               setCurrentSurveyorId(s.id);
               localStorage.setItem('active_surveyor_id', s.id);
               showNotification('success', `Đang thao tác với vai trò: ${s.name} (${ROLE_LABELS[s.role]?.label || s.role})`);
