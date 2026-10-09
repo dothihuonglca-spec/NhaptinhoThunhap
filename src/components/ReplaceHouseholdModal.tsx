@@ -68,8 +68,6 @@ export const ReplaceHouseholdModal: React.FC<ReplaceHouseholdModalProps> = ({
   onConfirmReplacement,
   onAddNewReserveHousehold
 }) => {
-  if (!isOpen || !householdToReplace) return null;
-
   const [selectedReserveId, setSelectedReserveId] = useState<string>('');
   const [selectedReason, setSelectedReason] = useState<string>(DEFAULT_REASONS[0]);
   const [customNote, setCustomNote] = useState<string>('');
@@ -90,6 +88,7 @@ export const ReplaceHouseholdModal: React.FC<ReplaceHouseholdModalProps> = ({
 
   // Identify area name
   const matchedArea = useMemo(() => {
+    if (!householdToReplace) return undefined;
     return areas.find(a => 
       (householdToReplace.areaId && a.id === householdToReplace.areaId) ||
       (householdToReplace.areaCode && a.code === householdToReplace.areaCode && (!householdToReplace.communeId || !a.communeId || a.communeId === householdToReplace.communeId)) ||
@@ -97,14 +96,15 @@ export const ReplaceHouseholdModal: React.FC<ReplaceHouseholdModalProps> = ({
     );
   }, [areas, householdToReplace]);
 
-  const areaNameDisplay = (householdToReplace.areaName && householdToReplace.areaName.trim() && householdToReplace.areaName !== 'Địa bàn')
+  const areaNameDisplay = (householdToReplace?.areaName && householdToReplace.areaName.trim() && householdToReplace.areaName !== 'Địa bàn')
     ? householdToReplace.areaName.trim()
     : (matchedArea?.name && matchedArea.name.trim() && matchedArea.name !== 'Địa bàn')
     ? matchedArea.name.trim()
-    : ((householdToReplace as any).sheetName || (householdToReplace.areaCode ? `Địa bàn ${householdToReplace.areaCode}` : '---'));
+    : ((householdToReplace as any)?.sheetName || (householdToReplace?.areaCode ? `Địa bàn ${householdToReplace.areaCode}` : '---'));
 
   // Get all households in the SAME enumeration area
   const sameAreaHouseholds = useMemo(() => {
+    if (!householdToReplace) return [];
     return allHouseholds.filter(h => {
       if (h.id === householdToReplace.id) return false;
       const sameArea = (h.areaId && householdToReplace.areaId && h.areaId === householdToReplace.areaId) ||
@@ -149,6 +149,9 @@ export const ReplaceHouseholdModal: React.FC<ReplaceHouseholdModalProps> = ({
   const selectedReserveHousehold = useMemo(() => {
     return sameAreaHouseholds.find(h => h.id === selectedReserveId);
   }, [sameAreaHouseholds, selectedReserveId]);
+
+  // Return null AFTER all hooks have executed to comply with React 19 Rules of Hooks
+  if (!isOpen || !householdToReplace) return null;
 
   const handleConfirm = async () => {
     if (!selectedReserveHousehold || !householdToReplace) return;

@@ -3,16 +3,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Save, X, Plus, Trash2, BookOpen, Check, Calculator, ChevronRight, 
-  Printer, Lock, Unlock, ShieldAlert, CheckCircle2, UserCheck, AlertTriangle 
+  Printer, Lock, Unlock, ShieldAlert, CheckCircle2, UserCheck, AlertTriangle, RotateCcw,
+  FileSpreadsheet, Users, Briefcase, Award, CheckSquare, Layers, TrendingUp
 } from 'lucide-react';
-import { FullQuestionnaire, ProductionRow, NonAgriRow, SalaryRow } from '../types/questionnaire';
+import { 
+  FullQuestionnaire, ProductionRow, NonAgriRow, SalaryRow,
+  QuestionnaireType, QUESTIONNAIRE_TYPES,
+  LaborMemberRow, LaborQuestionnaire, MultidimensionalPovertyQuestionnaire, QuickIncomeQuestionnaire,
+  createDefaultLaborQuestionnaire, createDefaultPovertyQuestionnaire, createDefaultQuickIncomeQuestionnaire
+} from '../types/questionnaire';
 import { calculateFullIncome, calcProductionRowIncome, calcNonAgriRowIncome } from '../utils/incomeCalculator';
 import CatalogModal, { CatalogSectionType } from './CatalogModal';
 import { CatalogItem } from '../constants/catalogs';
 import { Surveyor, SurveyStatus, SURVEY_STATUS_LABELS } from '../types/user';
+import { LaborQuestionnaireView } from './questionnaires/LaborQuestionnaireView';
+import { PovertyQuestionnaireView } from './questionnaires/PovertyQuestionnaireView';
+import { QuickIncomeQuestionnaireView } from './questionnaires/QuickIncomeQuestionnaireView';
 
 interface QuestionnaireModalProps {
   household: any;
@@ -31,12 +40,62 @@ export default function QuestionnaireModal({
   currentUser,
   allSurveyors = []
 }: QuestionnaireModalProps) {
-  if (!isOpen || !household) return null;
+  // Xóa trắng Tổng số nhân khẩu & Số người làm việc để người dùng bắt buộc tự gõ
+  // CHỈ giữ lại số nếu người dùng đã thực sự tự gõ và bấm lưu trước đó (membersCountEntered === true)
+  const isUserManuallyEntered = Boolean((household as any)?.membersCountEntered);
+  const [form, setForm] = useState<any>(() => ({
+    ...(household || {}),
+    membersCount: isUserManuallyEntered && household?.membersCount && Number(household.membersCount) > 0 ? household.membersCount : '',
+    workingMembersCount: isUserManuallyEntered && household?.workingMembersCount !== undefined && household?.workingMembersCount !== null && household?.workingMembersCount !== '' ? household.workingMembersCount : ''
+  }));
+  const [selectedQuestionnaireType, setSelectedQuestionnaireType] = useState<QuestionnaireType>(() => {
+    return (household as any)?.questionnaireType || 'PHIEU_01_THU_NHAP';
+  });
 
-  const [form, setForm] = useState<any>({ ...household });
+  const [laborForm, setLaborForm] = useState<LaborQuestionnaire>(() => {
+    return (household as any)?.laborQuestionnaire || createDefaultLaborQuestionnaire(household?.householdHead, Number(household?.membersCount) || 1);
+  });
+
+  const [povertyForm, setPovertyForm] = useState<MultidimensionalPovertyQuestionnaire>(() => {
+    return (household as any)?.povertyQuestionnaire || createDefaultPovertyQuestionnaire();
+  });
+
+  const [quickIncomeForm, setQuickIncomeForm] = useState<QuickIncomeQuestionnaire>(() => {
+    return (household as any)?.quickIncomeQuestionnaire || createDefaultQuickIncomeQuestionnaire();
+  });
+
+  const [validationWarning, setValidationWarning] = useState<string | null>(null);
+  const [validationAlertModal, setValidationAlertModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    field: 'membersCount' | 'workingMembersCount';
+  } | null>(null);
+
+  // Tự động đồng bộ lại form khi chuyển sang hộ khác hoặc mở phiếu mới
+  useEffect(() => {
+    if (household) {
+      const isManual = Boolean((household as any)?.membersCountEntered);
+      setForm({
+        ...household,
+        membersCount: isManual && household.membersCount && Number(household.membersCount) > 0 ? household.membersCount : '',
+        workingMembersCount: isManual && household.workingMembersCount !== undefined && household.workingMembersCount !== null && household.workingMembersCount !== '' ? household.workingMembersCount : ''
+      });
+      setSelectedQuestionnaireType((household as any)?.questionnaireType || 'PHIEU_01_THU_NHAP');
+      setLaborForm((household as any)?.laborQuestionnaire || createDefaultLaborQuestionnaire(household?.householdHead, Number(household?.membersCount) || 1));
+      setPovertyForm((household as any)?.povertyQuestionnaire || createDefaultPovertyQuestionnaire());
+      setQuickIncomeForm((household as any)?.quickIncomeQuestionnaire || createDefaultQuickIncomeQuestionnaire());
+      setValidationWarning(null);
+      setValidationAlertModal(null);
+    }
+  }, [household?.id]);
+
   const [activeTab, setActiveTab] = useState<'muc1' | 'muc2' | 'muc3' | 'muc4' | 'muc5' | 'muc6' | 'muc7' | 'tonghop'>('muc1');
   const [isCatalogOpen, setIsCatalogOpen] = useState(false);
   const [catalogSection, setCatalogSection] = useState<CatalogSectionType>('muc2');
+
+  // Đảm bảo không render modal khi chưa mở hoặc chưa chọn hộ (đặt sau toàn bộ hooks)
+  if (!isOpen || !household) return null;
 
   const defaultSurveyorName = form.assignedSurveyorName || (currentUser?.role === 'SURVEYOR' ? currentUser.name : '');
 
@@ -64,30 +123,97 @@ export default function QuestionnaireModal({
     setForm({ ...form, questionnaire: nextQ });
   };
 
+  const scrollToAndFocus = (fieldId: string) => {
+    setTimeout(() => {
+      const el = document.getElementById(fieldId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.focus();
+      }
+    }, 150);
+  };
+
   const handleSaveWithStatus = (newStatus?: SurveyStatus) => {
     if (isLocked) return;
+
+    // 1. Kiểm tra Tổng số nhân khẩu: Bắt buộc người dùng phải tự gõ số nguyên > 0
+    const rawMem = form.membersCount;
+    if (rawMem === '' || rawMem === null || rawMem === undefined || isNaN(Number(rawMem)) || Number(rawMem) <= 0) {
+      const msg = 'Vui lòng nhập Tổng số nhân khẩu của hộ (lớn hơn 0)';
+      setValidationWarning(msg);
+      setValidationAlertModal({
+        isOpen: true,
+        title: 'Chưa nhập Tổng số nhân khẩu',
+        message: 'Vui lòng nhập "Tổng số nhân khẩu" thực tế của hộ (lớn hơn 0) trước khi bấm Lưu và hoàn thành.',
+        field: 'membersCount'
+      });
+      scrollToAndFocus('input-members-count');
+      return;
+    }
+
+    // 2. Kiểm tra Số người làm việc: Bắt buộc người dùng phải tự gõ số nguyên >= 0
+    const rawWork = form.workingMembersCount;
+    if (rawWork === '' || rawWork === null || rawWork === undefined || isNaN(Number(rawWork)) || Number(rawWork) < 0) {
+      const msg = 'Vui lòng nhập Số người làm việc của hộ (từ 0 trở lên)';
+      setValidationWarning(msg);
+      setValidationAlertModal({
+        isOpen: true,
+        title: 'Chưa nhập Số người làm việc',
+        message: 'Vui lòng nhập "Số người làm việc" thực tế của hộ (từ 0 trở lên) trước khi bấm Lưu và hoàn thành.',
+        field: 'workingMembersCount'
+      });
+      scrollToAndFocus('input-working-members-count');
+      return;
+    }
+
+    const memVal = Math.round(Number(rawMem));
+    const workVal = Math.round(Number(rawWork));
+
+    // 3. Kiểm tra logic: Số người làm việc không được vượt quá Tổng số nhân khẩu
+    if (workVal > memVal) {
+      const msg = `Số người làm việc (${workVal}) không được lớn hơn Tổng số nhân khẩu (${memVal})`;
+      setValidationWarning(msg);
+      setValidationAlertModal({
+        isOpen: true,
+        title: 'Cảnh báo số người làm việc',
+        message: `Số người làm việc (${workVal} người) không được lớn hơn Tổng số nhân khẩu (${memVal} người). Vui lòng kiểm tra lại trước khi lưu.`,
+        field: 'workingMembersCount'
+      });
+      scrollToAndFocus('input-working-members-count');
+      return;
+    }
+
+    // Xóa cảnh báo nếu tất cả hợp lệ
+    setValidationWarning(null);
+    setValidationAlertModal(null);
+
     const finalStatus = newStatus || form.surveyStatus || 'DANG_NHAP';
     const assignedSurveyor = allSurveyors.find(s => s.id === form.assignedSurveyorId);
-    
-    const memVal = form.membersCount === '' || isNaN(Number(form.membersCount)) || Number(form.membersCount) <= 0 
-      ? 1 
-      : Number(form.membersCount);
-    const workVal = form.workingMembersCount === '' || isNaN(Number(form.workingMembersCount)) || Number(form.workingMembersCount) < 0 
-      ? 0 
-      : Number(form.workingMembersCount);
 
     const payload = {
       ...form,
       membersCount: memVal,
       workingMembersCount: workVal,
+      membersCountEntered: true,
       surveyStatus: finalStatus,
       assignedSurveyorName: assignedSurveyor ? assignedSurveyor.name : form.assignedSurveyorName,
       updatedBy: currentUser?.name || 'Hệ thống',
       updatedAt: new Date().toISOString(),
+      questionnaireType: selectedQuestionnaireType,
       questionnaire: {
         ...q,
         surveyorName: q.surveyorName || form.assignedSurveyorName || currentUser?.name || ''
-      }
+      },
+      laborQuestionnaire: {
+        ...laborForm,
+        surveyorName: laborForm.surveyorName || form.assignedSurveyorName || currentUser?.name || '',
+        workingAgeCount: laborForm.members.length,
+        employedCount: laborForm.members.filter(m => m.employmentStatus === 'Có việc làm').length,
+        insuredCount: laborForm.members.filter(m => m.hasSocialInsurance).length,
+        trainedCount: laborForm.members.filter(m => m.technicalQualification && m.technicalQualification !== 'Chưa qua đào tạo').length
+      },
+      povertyQuestionnaire: povertyForm,
+      quickIncomeQuestionnaire: quickIncomeForm
     };
     onSave(payload);
   };
@@ -440,6 +566,37 @@ export default function QuestionnaireModal({
           </div>
         </div>
 
+        {/* BỘ CHỌN LOẠI PHIẾU ĐIỀU TRA (HỖ TRỢ MỞ RỘNG NHẬP TIN ĐA DẠNG LOẠI PHIẾU) */}
+        <div className="bg-sky-950 text-white px-4 py-2 flex flex-wrap items-center justify-between gap-2 border-b border-sky-900 shadow-inner">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wide flex items-center gap-1.5 shrink-0">
+              <FileSpreadsheet className="w-4 h-4 text-amber-300" />
+              Chọn Loại Phiếu:
+            </span>
+            <div className="flex items-center bg-sky-900/90 p-0.5 rounded-lg border border-sky-700/80 gap-1 flex-wrap">
+              {QUESTIONNAIRE_TYPES.map(qt => (
+                <button
+                  key={qt.id}
+                  type="button"
+                  onClick={() => setSelectedQuestionnaireType(qt.id)}
+                  className={`px-3 py-1 rounded font-bold transition-all text-xs flex items-center gap-1.5 cursor-pointer ${
+                    selectedQuestionnaireType === qt.id
+                      ? 'bg-amber-400 text-slate-950 shadow-xs'
+                      : 'text-sky-200 hover:text-white hover:bg-sky-800'
+                  }`}
+                  title={qt.description}
+                >
+                  <span className="text-[10px] font-black opacity-80">[{qt.code}]</span>
+                  <span>{qt.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="text-[11px] text-sky-200 hidden md:block italic">
+            💡 {QUESTIONNAIRE_TYPES.find(qt => qt.id === selectedQuestionnaireType)?.description}
+          </div>
+        </div>
+
         {/* Lock Warning Banner */}
         {isLocked && (
           <div className="bg-amber-500 text-white px-4 py-2 flex items-center justify-between text-xs font-bold shadow-xs">
@@ -448,6 +605,23 @@ export default function QuestionnaireModal({
               <span>Phiếu này đã được Tổ trưởng / Quản trị viên duyệt và khóa. Bạn đang ở chế độ xem an toàn (Chỉ xem).</span>
             </div>
             <span className="text-[11px] bg-amber-700/60 px-2 py-0.5 rounded">Cần quyền Admin để mở khóa</span>
+          </div>
+        )}
+
+        {/* Validation Warning Alert Banner (Hiện khi người dùng chưa nhập nhân khẩu/người làm việc) */}
+        {validationWarning && (
+          <div className="bg-rose-600 text-white px-4 py-2.5 flex items-center justify-between text-xs font-bold shadow-md animate-in fade-in duration-150">
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="w-5 h-5 shrink-0 text-amber-200 animate-bounce" />
+              <span>{validationWarning}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setValidationWarning(null)}
+              className="text-white hover:text-rose-200 p-1 font-bold cursor-pointer rounded hover:bg-rose-700"
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         )}
 
@@ -482,48 +656,66 @@ export default function QuestionnaireModal({
               className="w-full bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-medium disabled:bg-slate-100"
             />
           </div>
-          <div>
-            <span className="text-[10px] text-slate-600 block font-bold" title="Người dùng tự gõ chính xác theo phiếu điều tra thực tế">
-              Tổng nhân khẩu (Tự gõ):
-            </span>
+          <div className="relative">
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[10px] text-slate-700 block font-bold flex items-center gap-1" title="Bắt buộc: Nhập tổng số nhân khẩu thực tế của hộ">
+                <span>Nhập tổng số nhân khẩu:</span>
+                <span className="text-rose-600 font-black">*</span>
+              </span>
+              {(!form.membersCount || Number(form.membersCount) <= 0) && (
+                <span className="text-[9px] bg-rose-100 text-rose-700 font-bold px-1 rounded animate-pulse">
+                  Chưa nhập
+                </span>
+              )}
+            </div>
             <input 
+              id="input-members-count"
               type="number" 
               disabled={isLocked}
               value={form.membersCount !== undefined && form.membersCount !== null ? form.membersCount : ''} 
               onChange={e => {
                 const val = e.target.value;
-                setForm({ ...form, membersCount: val === '' ? '' : parseInt(val, 10) });
-              }}
-              onBlur={() => {
-                if (form.membersCount === '' || isNaN(Number(form.membersCount)) || Number(form.membersCount) <= 0) {
-                  setForm((prev: any) => ({ ...prev, membersCount: 1 }));
-                }
+                setForm((prev: any) => ({ ...prev, membersCount: val === '' ? '' : parseInt(val, 10) }));
+                if (validationWarning) setValidationWarning(null);
               }}
               min="1"
-              placeholder="Nhập số..."
-              className="w-full bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold text-center disabled:bg-slate-100 text-sky-950 focus:border-sky-600 focus:outline-none"
+              placeholder="Nhập tổng số nhân khẩu..."
+              className={`w-full bg-white border rounded px-1.5 py-0.5 text-xs font-bold text-center disabled:bg-slate-100 text-sky-950 focus:outline-none transition-all ${
+                (!form.membersCount || Number(form.membersCount) <= 0)
+                  ? 'border-rose-500 ring-2 ring-rose-300 bg-rose-50/60 placeholder:text-rose-400'
+                  : 'border-slate-300 focus:border-sky-600'
+              }`}
             />
           </div>
-          <div>
-            <span className="text-[10px] text-slate-600 block font-bold" title="Người dùng tự gõ chính xác theo phiếu điều tra thực tế">
-              Số người làm việc (Tự gõ):
-            </span>
+          <div className="relative">
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[10px] text-slate-700 block font-bold flex items-center gap-1" title="Bắt buộc: Nhập số người làm việc thực tế của hộ (tối thiểu 0)">
+                <span>Nhập số người làm việc:</span>
+                <span className="text-rose-600 font-black">*</span>
+              </span>
+              {(form.workingMembersCount === '' || form.workingMembersCount === null || form.workingMembersCount === undefined) && (
+                <span className="text-[9px] bg-rose-100 text-rose-700 font-bold px-1 rounded animate-pulse">
+                  Chưa nhập
+                </span>
+              )}
+            </div>
             <input 
+              id="input-working-members-count"
               type="number" 
               disabled={isLocked}
               value={form.workingMembersCount !== undefined && form.workingMembersCount !== null ? form.workingMembersCount : ''} 
               onChange={e => {
                 const val = e.target.value;
-                setForm({ ...form, workingMembersCount: val === '' ? '' : parseInt(val, 10) });
-              }}
-              onBlur={() => {
-                if (form.workingMembersCount === '' || isNaN(Number(form.workingMembersCount)) || Number(form.workingMembersCount) < 0) {
-                  setForm((prev: any) => ({ ...prev, workingMembersCount: 0 }));
-                }
+                setForm((prev: any) => ({ ...prev, workingMembersCount: val === '' ? '' : parseInt(val, 10) }));
+                if (validationWarning) setValidationWarning(null);
               }}
               min="0"
-              placeholder="Nhập số..."
-              className="w-full bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs font-bold text-center disabled:bg-slate-100 text-sky-950 focus:border-sky-600 focus:outline-none"
+              placeholder="Nhập số người làm việc..."
+              className={`w-full bg-white border rounded px-1.5 py-0.5 text-xs font-bold text-center disabled:bg-slate-100 text-sky-950 focus:outline-none transition-all ${
+                (form.workingMembersCount === '' || form.workingMembersCount === null || form.workingMembersCount === undefined)
+                  ? 'border-rose-500 ring-2 ring-rose-300 bg-rose-50/60 placeholder:text-rose-400'
+                  : 'border-slate-300 focus:border-sky-600'
+              }`}
             />
           </div>
           <div>
@@ -554,63 +746,100 @@ export default function QuestionnaireModal({
           </div>
         </div>
 
-        {/* Section Navigation Tabs */}
-        <div className="bg-slate-100 border-b border-slate-300 px-3 flex items-center gap-1 overflow-x-auto font-bold text-[11px]">
-          <button 
-            onClick={() => setActiveTab('muc1')} 
-            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc1' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
-          >
-            Mục 1: Lương, công ({income.muc1.toLocaleString()} đ)
-          </button>
-          <button 
-            onClick={() => setActiveTab('muc2')} 
-            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc2' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
-          >
-            Mục 2: Trồng trọt ({income.muc2.toLocaleString()} đ)
-          </button>
-          <button 
-            onClick={() => setActiveTab('muc3')} 
-            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc3' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
-          >
-            Mục 3: Chăn nuôi ({income.muc3.toLocaleString()} đ)
-          </button>
-          <button 
-            onClick={() => setActiveTab('muc4')} 
-            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc4' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
-          >
-            Mục 4: Lâm nghiệp ({income.muc4.toLocaleString()} đ)
-          </button>
-          <button 
-            onClick={() => setActiveTab('muc5')} 
-            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc5' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
-          >
-            Mục 5: Thủy sản ({income.muc5.toLocaleString()} đ)
-          </button>
-          <button 
-            onClick={() => setActiveTab('muc6')} 
-            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc6' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
-          >
-            Mục 6: Phi nông ({income.muc6.toLocaleString()} đ)
-          </button>
-          <button 
-            onClick={() => setActiveTab('muc7')} 
-            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc7' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
-          >
-            Mục 7: Thu khác ({income.muc7.toLocaleString()} đ)
-          </button>
-          <button 
-            onClick={() => setActiveTab('tonghop')} 
-            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors bg-emerald-50 text-emerald-900 border-emerald-600 font-extrabold`}
-          >
-            ★ Biểu tổng hợp hộ: {income.total.toLocaleString()} đ
-          </button>
-        </div>
+        {/* Section Navigation Tabs (Chỉ hiển thị cho Phiếu 01: Thu nhập 7 mục) */}
+        {selectedQuestionnaireType === 'PHIEU_01_THU_NHAP' && (
+          <div className="bg-slate-100 border-b border-slate-300 px-3 flex items-center gap-1 overflow-x-auto font-bold text-[11px]">
+            <button 
+              onClick={() => setActiveTab('muc1')} 
+              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc1' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
+            >
+              Mục 1: Lương, công ({income.muc1.toLocaleString()} đ)
+            </button>
+            <button 
+              onClick={() => setActiveTab('muc2')} 
+              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc2' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
+            >
+              Mục 2: Trồng trọt ({income.muc2.toLocaleString()} đ)
+            </button>
+            <button 
+              onClick={() => setActiveTab('muc3')} 
+              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc3' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
+            >
+              Mục 3: Chăn nuôi ({income.muc3.toLocaleString()} đ)
+            </button>
+            <button 
+              onClick={() => setActiveTab('muc4')} 
+              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc4' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
+            >
+              Mục 4: Lâm nghiệp ({income.muc4.toLocaleString()} đ)
+            </button>
+            <button 
+              onClick={() => setActiveTab('muc5')} 
+              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc5' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
+            >
+              Mục 5: Thủy sản ({income.muc5.toLocaleString()} đ)
+            </button>
+            <button 
+              onClick={() => setActiveTab('muc6')} 
+              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc6' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
+            >
+              Mục 6: Phi nông ({income.muc6.toLocaleString()} đ)
+            </button>
+            <button 
+              onClick={() => setActiveTab('muc7')} 
+              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc7' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
+            >
+              Mục 7: Thu khác ({income.muc7.toLocaleString()} đ)
+            </button>
+            <button 
+              onClick={() => setActiveTab('tonghop')} 
+              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors bg-emerald-50 text-emerald-900 border-emerald-600 font-extrabold`}
+            >
+              ★ Biểu tổng hợp hộ: {income.total.toLocaleString()} đ
+            </button>
+          </div>
+        )}
 
         {/* Tab Body */}
         <div className="p-4 overflow-y-auto flex-1 flex flex-col gap-4 bg-slate-50">
 
-          {/* MỤC 1: LƯƠNG, TIỀN CÔNG (Trang 1) */}
-          {activeTab === 'muc1' && (
+          {/* HIỂN THỊ PHIẾU 02: LAO ĐỘNG & VIỆC LÀM */}
+          {selectedQuestionnaireType === 'PHIEU_02_LAO_DONG' && (
+            <LaborQuestionnaireView
+              laborForm={laborForm}
+              setLaborForm={setLaborForm}
+              membersCount={form.membersCount}
+              workingMembersCount={form.workingMembersCount}
+              householdHead={form.householdHead}
+              isLocked={isLocked}
+            />
+          )}
+
+          {/* HIỂN THỊ PHIẾU 03: RÀ SOÁT HỘ NGHÈO ĐA CHIỀU */}
+          {selectedQuestionnaireType === 'PHIEU_03_HO_NGHEO' && (
+            <PovertyQuestionnaireView
+              povertyForm={povertyForm}
+              setPovertyForm={setPovertyForm}
+              membersCount={form.membersCount}
+              isLocked={isLocked}
+            />
+          )}
+
+          {/* HIỂN THỊ PHIẾU 04: THU NHẬP RÚT GỌN */}
+          {selectedQuestionnaireType === 'PHIEU_04_RUT_GON' && (
+            <QuickIncomeQuestionnaireView
+              quickIncomeForm={quickIncomeForm}
+              setQuickIncomeForm={setQuickIncomeForm}
+              membersCount={form.membersCount}
+              isLocked={isLocked}
+            />
+          )}
+
+          {/* HIỂN THỊ PHIẾU 01: THU NHẬP 7 MỤC CHI TIẾT */}
+          {selectedQuestionnaireType === 'PHIEU_01_THU_NHAP' && (
+            <>
+              {/* MỤC 1: LƯƠNG, TIỀN CÔNG (Trang 1) */}
+              {activeTab === 'muc1' && (
             <div className="flex flex-col gap-3">
               <div className="bg-white p-3 rounded border border-slate-300 flex items-center justify-between">
                 <div>
@@ -1231,13 +1460,27 @@ export default function QuestionnaireModal({
               {/* Bảng chỉ tiêu nhân khẩu và thu nhập bình quân của hộ */}
               <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shadow-2xs">
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-slate-800 flex-1">
-                  <div className="bg-white p-2 rounded border border-amber-200">
-                    <span className="text-slate-500 block text-[11px] font-medium">Tổng nhân khẩu (Gõ theo ĐT):</span>
-                    <strong className="text-sm font-black text-rose-900">{form.membersCount || 1} người</strong>
+                  <div className={`p-2 rounded border transition-colors ${(!form.membersCount || Number(form.membersCount) <= 0) ? 'bg-rose-50 border-rose-300' : 'bg-white border-amber-200'}`}>
+                    <span className="text-slate-500 block text-[11px] font-medium flex items-center justify-between">
+                      <span>Tổng nhân khẩu:</span>
+                      {(!form.membersCount || Number(form.membersCount) <= 0) && (
+                        <span className="text-[10px] text-rose-600 font-black">Chưa nhập *</span>
+                      )}
+                    </span>
+                    <strong className={`text-sm font-black ${(!form.membersCount || Number(form.membersCount) <= 0) ? 'text-rose-700' : 'text-slate-900'}`}>
+                      {form.membersCount && Number(form.membersCount) > 0 ? `${form.membersCount} người` : 'Chưa nhập số nhân khẩu'}
+                    </strong>
                   </div>
-                  <div className="bg-white p-2 rounded border border-amber-200">
-                    <span className="text-slate-500 block text-[11px] font-medium">Số người làm việc:</span>
-                    <strong className="text-sm font-black text-slate-900">{form.workingMembersCount ?? 0} người</strong>
+                  <div className={`p-2 rounded border transition-colors ${(form.workingMembersCount === '' || form.workingMembersCount === null || form.workingMembersCount === undefined) ? 'bg-rose-50 border-rose-300' : 'bg-white border-amber-200'}`}>
+                    <span className="text-slate-500 block text-[11px] font-medium flex items-center justify-between">
+                      <span>Số người làm việc:</span>
+                      {(form.workingMembersCount === '' || form.workingMembersCount === null || form.workingMembersCount === undefined) && (
+                        <span className="text-[10px] text-rose-600 font-black">Chưa nhập *</span>
+                      )}
+                    </span>
+                    <strong className={`text-sm font-black ${(form.workingMembersCount === '' || form.workingMembersCount === null || form.workingMembersCount === undefined) ? 'text-rose-700' : 'text-slate-900'}`}>
+                      {form.workingMembersCount !== '' && form.workingMembersCount !== null && form.workingMembersCount !== undefined ? `${form.workingMembersCount} người` : 'Chưa nhập số người làm việc'}
+                    </strong>
                   </div>
                   <div className="bg-white p-2 rounded border border-amber-200 col-span-2 md:col-span-1">
                     <span className="text-slate-500 block text-[11px] font-medium">Tổng thu nhập hộ:</span>
@@ -1250,7 +1493,9 @@ export default function QuestionnaireModal({
                     TNBQ 1 người / tháng:
                   </span>
                   <strong className="text-base font-black text-amber-300 block mt-0.5">
-                    {Math.round(income.total / (Number(form.membersCount) || 1) / 12).toLocaleString()} đ/người/tháng
+                    {Number(form.membersCount) > 0 
+                      ? `${Math.round(income.total / Number(form.membersCount) / 12).toLocaleString()} đ/người/tháng` 
+                      : 'Chờ nhập số nhân khẩu'}
                   </strong>
                 </div>
               </div>
@@ -1281,78 +1526,151 @@ export default function QuestionnaireModal({
               </div>
             </div>
           )}
+          </>
+        )}
 
         </div>
 
         {/* Footer actions */}
-        <div className="bg-slate-100 p-3 border-t border-slate-300 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-700">Tổng thu nhập hộ:</span>
-            <span className="font-black text-emerald-800 text-sm bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
-              {income.total.toLocaleString()} (1.000 đồng)
-            </span>
-          </div>
+        <div className="bg-slate-100 p-3 border-t border-slate-300 flex flex-col gap-2">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              {selectedQuestionnaireType === 'PHIEU_01_THU_NHAP' && (
+                <>
+                  <span className="font-bold text-slate-700">Tổng thu nhập hộ:</span>
+                  <span className="font-black text-emerald-800 text-sm bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
+                    {income.total.toLocaleString()} (1.000 đồng)
+                  </span>
+                </>
+              )}
 
-          <div className="flex items-center gap-2">
-            <button 
-              type="button" 
-              onClick={onClose}
-              className="px-4 py-1.5 bg-slate-300 hover:bg-slate-400 text-slate-800 rounded font-bold cursor-pointer"
-            >
-              Đóng
-            </button>
+              {selectedQuestionnaireType === 'PHIEU_02_LAO_DONG' && (
+                <>
+                  <span className="font-bold text-slate-700">Tổng thu nhập từ việc làm:</span>
+                  <span className="font-black text-indigo-800 text-sm bg-indigo-100 px-2 py-0.5 rounded border border-indigo-300">
+                    {((laborForm.members || []).reduce((s, m) => s + (Number(m.monthlyIncomeEst) || 0) * 12, 0)).toLocaleString()} (1.000 đồng/năm)
+                  </span>
+                </>
+              )}
 
-            {!isLocked ? (
-              <>
-                <button 
-                  type="button" 
-                  onClick={() => handleSaveWithStatus('DANG_NHAP')}
-                  className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
-                  title="Lưu dữ liệu và đánh dấu đang điều tra dở"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>Lưu Nháp</span>
-                </button>
+              {selectedQuestionnaireType === 'PHIEU_03_HO_NGHEO' && (
+                <>
+                  <span className="font-bold text-slate-700">Kết luận chuẩn đa chiều:</span>
+                  <span className={`font-black text-xs px-2.5 py-1 rounded border shadow-2xs ${
+                    povertyForm.povertyClassification === 'Hộ nghèo'
+                      ? 'bg-rose-100 text-rose-900 border-rose-300'
+                      : povertyForm.povertyClassification === 'Hộ cận nghèo'
+                      ? 'bg-amber-100 text-amber-900 border-amber-300'
+                      : 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                  }`}>
+                    {povertyForm.povertyClassification} ({povertyForm.b1_totalScore} đ B1 • {povertyForm.b2_deprivationCount}/12 thiếu hụt)
+                  </span>
+                </>
+              )}
 
-                <button 
-                  type="button" 
-                  onClick={() => handleSaveWithStatus('DA_HOAN_THANH')}
-                  className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
-                  title="Lưu dữ liệu và đánh dấu đã điều tra hoàn tất"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Lưu & Hoàn Thành</span>
-                </button>
+              {selectedQuestionnaireType === 'PHIEU_04_RUT_GON' && (
+                <>
+                  <span className="font-bold text-slate-700">Tổng thu nhập ròng cả năm:</span>
+                  <span className="font-black text-emerald-800 text-sm bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
+                    {quickIncomeForm.totalNetIncome.toLocaleString()} (1.000 đồng)
+                  </span>
+                </>
+              )}
+            </div>
 
-                {isAdmin && (
+            <div className="flex items-center gap-2">
+              <button 
+                type="button" 
+                onClick={onClose}
+                className="px-4 py-1.5 bg-slate-300 hover:bg-slate-400 text-slate-800 rounded font-bold cursor-pointer"
+              >
+                Đóng
+              </button>
+
+              {!isLocked ? (
+                <>
                   <button 
                     type="button" 
-                    onClick={() => handleSaveWithStatus('DA_DUYET')}
-                    className="px-4 py-1.5 bg-purple-700 hover:bg-purple-600 text-white rounded font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
-                    title="Duyệt kết quả và khóa không cho sửa đổi"
+                    onClick={() => handleSaveWithStatus('DANG_NHAP')}
+                    className="px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    title="Lưu dữ liệu và đánh dấu đang điều tra dở"
                   >
-                    <Lock className="w-4 h-4" />
-                    <span>Duyệt & Khóa Phiếu</span>
+                    <Save className="w-4 h-4" />
+                    <span>Lưu Nháp</span>
                   </button>
-                )}
-              </>
-            ) : (
-              isAdmin && (
-                <button 
-                  type="button" 
-                  onClick={() => handleSaveWithStatus('DA_HOAN_THANH')}
-                  className="px-4 py-1.5 bg-indigo-700 hover:bg-indigo-600 text-white rounded font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
-                  title="Mở khóa để cho phép điều tra viên cập nhật lại"
-                >
-                  <Unlock className="w-4 h-4" />
-                  <span>Mở Khóa Phiếu (Admin)</span>
-                </button>
-              )
-            )}
+
+                  <button 
+                    type="button" 
+                    onClick={() => handleSaveWithStatus('DA_HOAN_THANH')}
+                    className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    title="Lưu dữ liệu và đánh dấu đã điều tra hoàn tất"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Lưu & Hoàn Thành</span>
+                  </button>
+
+                  {isAdmin && (
+                    <button 
+                      type="button" 
+                      onClick={() => handleSaveWithStatus('DA_DUYET')}
+                      className="px-4 py-1.5 bg-purple-700 hover:bg-purple-600 text-white rounded font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      title="Duyệt kết quả và khóa không cho sửa đổi"
+                    >
+                      <Lock className="w-4 h-4" />
+                      <span>Duyệt & Khóa Phiếu</span>
+                    </button>
+                  )}
+                </>
+              ) : (
+                isAdmin && (
+                  <button 
+                    type="button" 
+                    onClick={() => handleSaveWithStatus('DA_HOAN_THANH')}
+                    className="px-4 py-1.5 bg-indigo-700 hover:bg-indigo-600 text-white rounded font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    title="Mở khóa để cho phép điều tra viên cập nhật lại"
+                  >
+                    <Unlock className="w-4 h-4" />
+                    <span>Mở Khóa Phiếu (Admin)</span>
+                  </button>
+                )
+              )}
+            </div>
           </div>
         </div>
 
       </div>
+
+      {/* POPUP CẢNH BÁO KHI CHƯA NHẬP NHÂN KHẨU / SỐ NGƯỜI LÀM VIỆC */}
+      {validationAlertModal && validationAlertModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border-2 border-rose-500 scale-100 animate-in zoom-in-95 duration-150">
+            <div className="bg-rose-600 text-white p-4 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center shrink-0 shadow-inner">
+                <AlertTriangle className="w-5 h-5 text-amber-300 animate-bounce" />
+              </div>
+              <h3 className="font-black text-sm uppercase tracking-wide">
+                {validationAlertModal.title}
+              </h3>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="bg-rose-50 border border-rose-200 rounded-xl p-3.5 text-xs text-rose-950 leading-relaxed font-semibold">
+                {validationAlertModal.message}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const fieldToFocus = validationAlertModal.field === 'membersCount' ? 'input-members-count' : 'input-working-members-count';
+                  setValidationAlertModal(null);
+                  scrollToAndFocus(fieldToFocus);
+                }}
+                className="w-full py-2.5 px-4 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-black rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md hover:shadow-lg transition-all"
+              >
+                <span>Về màn hình nhập Nhân khẩu</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Catalog modal for quick lookup and selection */}
       <CatalogModal 

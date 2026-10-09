@@ -16,7 +16,10 @@ import {
 import { db, handleFirestoreError, OperationType, safeFirestoreWrite, isQuotaExceeded } from './firebase';
 import { collection, getDocs, addDoc, deleteDoc, doc, setDoc, query, onSnapshot, writeBatch } from 'firebase/firestore';
 
-import { FullQuestionnaire, createDefaultQuestionnaire } from './types/questionnaire';
+import { 
+  FullQuestionnaire, createDefaultQuestionnaire, QuestionnaireType, QUESTIONNAIRE_TYPES,
+  LaborQuestionnaire, MultidimensionalPovertyQuestionnaire, QuickIncomeQuestionnaire 
+} from './types/questionnaire';
 import { calculateFullIncome } from './utils/incomeCalculator';
 import QuestionnaireModal from './components/QuestionnaireModal';
 import CatalogModal from './components/CatalogModal';
@@ -84,6 +87,7 @@ export interface Household {
   phone: string;
   membersCount: number;
   workingMembersCount: number;
+  membersCountEntered?: boolean;
   sectorCode: 1 | 2 | 3 | 4;
   sectorName: string;
   note: string;
@@ -92,7 +96,11 @@ export interface Household {
   surveyStatus?: SurveyStatus;
   updatedBy?: string;
   updatedAt?: string;
+  questionnaireType?: QuestionnaireType;
   questionnaire?: FullQuestionnaire;
+  laborQuestionnaire?: LaborQuestionnaire;
+  povertyQuestionnaire?: MultidimensionalPovertyQuestionnaire;
+  quickIncomeQuestionnaire?: QuickIncomeQuestionnaire;
 }
 
 export interface SurveyArea {
@@ -299,7 +307,8 @@ export default function App() {
             return {
               ...h,
               membersCount: mem,
-              workingMembersCount: Math.min(mem, Math.max(1, Number(h.workingMembersCount) || mem - 1))
+              workingMembersCount: h.membersCountEntered ? (Number(h.workingMembersCount) || 0) : 0,
+              membersCountEntered: Boolean(h.membersCountEntered)
             };
           });
           setHouseholds(sanitized);
@@ -460,15 +469,16 @@ export default function App() {
           mem = (stt % 3 === 0) ? 4 : (stt % 2 === 0) ? 3 : (stt % 5 === 0) ? 5 : 4;
         }
         let workMem = Number(data.workingMembersCount);
-        if (isNaN(workMem) || workMem <= 0 || workMem > mem) {
-          workMem = Math.max(1, mem - 1);
+        if (isNaN(workMem) || workMem < 0) {
+          workMem = 0;
         }
 
         return {
           id: d.id,
           ...data,
           membersCount: mem,
-          workingMembersCount: workMem,
+          workingMembersCount: Boolean(data.membersCountEntered) ? workMem : 0,
+          membersCountEntered: Boolean(data.membersCountEntered),
           communeCode: data.communeCode || '',
           communeName: data.communeName || '',
           tkcsCode: data.tkcsCode || '',
@@ -1697,7 +1707,8 @@ export default function App() {
             address: addressVal,
             phone: phoneVal,
             membersCount: membersVal,
-            workingMembersCount: Math.max(1, membersVal - 1),
+            workingMembersCount: 0,
+            membersCountEntered: false,
             sectorCode: sectorVal as 1 | 2 | 3 | 4,
             sectorName: SECTOR_NAMES[sectorVal as 1 | 2 | 3 | 4] || 'Công nghiệp xây dựng',
             note: noteVal,
@@ -2064,7 +2075,8 @@ export default function App() {
             address: addressVal,
             phone: phoneVal,
             membersCount: membersVal,
-            workingMembersCount: Math.max(1, membersVal - 1),
+            workingMembersCount: 0,
+            membersCountEntered: false,
             sectorCode: sectorVal as 1 | 2 | 3 | 4,
             sectorName: SECTOR_NAMES[sectorVal as 1 | 2 | 3 | 4] || 'Công nghiệp xây dựng',
             note: noteVal,
@@ -2284,6 +2296,14 @@ export default function App() {
   ]);
 
   const calculateHouseholdTotalIncome = (h: Household) => {
+    if (h.questionnaireType === 'PHIEU_04_RUT_GON' && h.quickIncomeQuestionnaire) {
+      const net = Number(h.quickIncomeQuestionnaire.totalNetIncome) || 0;
+      return { muc1: 0, muc2: 0, muc3: 0, muc4: 0, muc5: 0, muc6: 0, muc7: 0, total: net };
+    }
+    if (h.questionnaireType === 'PHIEU_02_LAO_DONG' && h.laborQuestionnaire) {
+      const totalLabor = (h.laborQuestionnaire.members || []).reduce((sum, m) => sum + ((Number(m.monthlyIncomeEst) || 0) * 12), 0);
+      return { muc1: totalLabor, muc2: 0, muc3: 0, muc4: 0, muc5: 0, muc6: 0, muc7: 0, total: totalLabor };
+    }
     return calculateFullIncome(h.questionnaire);
   };
 
@@ -2291,6 +2311,9 @@ export default function App() {
   const isHouseholdSurveyed = (h: Household): boolean => {
     if (!h) return false;
     if (h.surveyStatus === 'DA_HOAN_THANH' || h.surveyStatus === 'DA_DUYET' || h.surveyStatus === 'DANG_NHAP') return true;
+    if (h.laborQuestionnaire && (h.laborQuestionnaire.members || []).length > 0) return true;
+    if (h.povertyQuestionnaire && h.povertyQuestionnaire.b1_totalScore > 0) return true;
+    if (h.quickIncomeQuestionnaire && h.quickIncomeQuestionnaire.totalNetIncome > 0) return true;
     if (h.questionnaire && (
       h.questionnaire.muc1_has || 
       h.questionnaire.muc2_has || 
@@ -2990,7 +3013,8 @@ export default function App() {
       address: newHhData.address,
       phone: newHhData.phone || '',
       membersCount: newHhData.membersCount || 4,
-      workingMembersCount: Math.max(1, (newHhData.membersCount || 4) - 1),
+      workingMembersCount: 0,
+      membersCountEntered: false,
       sectorCode: newHhData.sectorCode || 2,
       sectorName: SECTOR_NAMES[newHhData.sectorCode as 1 | 2 | 3 | 4] || 'Công nghiệp xây dựng',
       note: newHhData.note || '[Hộ dự phòng]',
@@ -6619,31 +6643,37 @@ export default function App() {
       )}
 
       {/* FULL PHỤ LỤC II QUESTIONNAIRE MODAL (ĐẦY ĐỦ 13 TRANG BIỂU MẪU & TRA CỨU DANH MỤC) */}
-      <QuestionnaireModal
-        household={activeHouseholdForm}
-        isOpen={!!activeHouseholdForm}
-        onClose={() => setActiveHouseholdForm(null)}
-        onSave={handleSaveQuestionnaire}
-        currentUser={currentUser}
-        allSurveyors={surveyors}
-      />
+      {activeHouseholdForm && (
+        <QuestionnaireModal
+          household={activeHouseholdForm}
+          isOpen={!!activeHouseholdForm}
+          onClose={() => setActiveHouseholdForm(null)}
+          onSave={handleSaveQuestionnaire}
+          currentUser={currentUser}
+          allSurveyors={surveyors}
+        />
+      )}
 
       {/* MODAL THAY THẾ HỘ MẪU ĐIỀU TRA BẰNG HỘ DỰ PHÒNG CÙNG ĐỊA BÀN */}
-      <ReplaceHouseholdModal
-        isOpen={!!householdToReplace}
-        onClose={() => setHouseholdToReplace(null)}
-        householdToReplace={householdToReplace}
-        allHouseholds={households}
-        areas={areas}
-        onConfirmReplacement={handleConfirmReplacement}
-        onAddNewReserveHousehold={handleAddNewReserveHousehold}
-      />
+      {householdToReplace && (
+        <ReplaceHouseholdModal
+          isOpen={!!householdToReplace}
+          onClose={() => setHouseholdToReplace(null)}
+          householdToReplace={householdToReplace}
+          allHouseholds={households}
+          areas={areas}
+          onConfirmReplacement={handleConfirmReplacement}
+          onAddNewReserveHousehold={handleAddNewReserveHousehold}
+        />
+      )}
 
       {/* SỔ TAY TRA CỨU DANH MỤC GLOBAL MODAL */}
-      <CatalogModal
-        isOpen={isGlobalCatalogOpen}
-        onClose={() => setIsGlobalCatalogOpen(false)}
-      />
+      {isGlobalCatalogOpen && (
+        <CatalogModal
+          isOpen={isGlobalCatalogOpen}
+          onClose={() => setIsGlobalCatalogOpen(false)}
+        />
+      )}
 
       {/* MODAL 1: XÁC NHẬN XÓA TOÀN BỘ DỮ LIỆU ĐỂ UP LẠI */}
       {isClearAllModalOpen && (
