@@ -502,7 +502,7 @@ export default function App() {
       });
       setHouseholds(hhs);
       if (hhs.length > 0) {
-        localStorage.setItem('cached_households', JSON.stringify(hhs));
+        try { localStorage.setItem('cached_households', JSON.stringify(hhs)); } catch (e) {}
       } else {
         localStorage.removeItem('cached_households');
       }
@@ -3242,14 +3242,16 @@ export default function App() {
     setAreas(remainingAreas);
     setHouseholds(remainingHouseholds);
 
-    if (remainingCommunes.length > 0) localStorage.setItem('cached_communes', JSON.stringify(remainingCommunes));
-    else localStorage.removeItem('cached_communes');
+    try {
+      if (remainingCommunes.length > 0) localStorage.setItem('cached_communes', JSON.stringify(remainingCommunes));
+      else localStorage.removeItem('cached_communes');
 
-    if (remainingAreas.length > 0) localStorage.setItem('cached_areas', JSON.stringify(remainingAreas));
-    else localStorage.removeItem('cached_areas');
+      if (remainingAreas.length > 0) localStorage.setItem('cached_areas', JSON.stringify(remainingAreas));
+      else localStorage.removeItem('cached_areas');
 
-    if (remainingHouseholds.length > 0) localStorage.setItem('cached_households', JSON.stringify(remainingHouseholds));
-    else localStorage.removeItem('cached_households');
+      if (remainingHouseholds.length > 0) localStorage.setItem('cached_households', JSON.stringify(remainingHouseholds));
+      else localStorage.removeItem('cached_households');
+    } catch (e) {}
 
     if (selectedCommuneId === communeId) setSelectedCommuneId('ALL');
     setCommuneToDelete(null);
@@ -3288,11 +3290,13 @@ export default function App() {
     setAreas(remainingAreas);
     setHouseholds(remainingHouseholds);
 
-    if (remainingAreas.length > 0) localStorage.setItem('cached_areas', JSON.stringify(remainingAreas));
-    else localStorage.removeItem('cached_areas');
+    try {
+      if (remainingAreas.length > 0) localStorage.setItem('cached_areas', JSON.stringify(remainingAreas));
+      else localStorage.removeItem('cached_areas');
 
-    if (remainingHouseholds.length > 0) localStorage.setItem('cached_households', JSON.stringify(remainingHouseholds));
-    else localStorage.removeItem('cached_households');
+      if (remainingHouseholds.length > 0) localStorage.setItem('cached_households', JSON.stringify(remainingHouseholds));
+      else localStorage.removeItem('cached_households');
+    } catch (e) {}
 
     if (selectedAreaId === area.id || selectedAreaId === area.code) setSelectedAreaId('ALL');
     setAreaToDelete(null);
@@ -3321,8 +3325,10 @@ export default function App() {
   const handleDeleteSingleHousehold = async (household: Household) => {
     setHouseholds(prev => {
       const next = prev.filter(h => h.id !== household.id);
-      if (next.length > 0) localStorage.setItem('cached_households', JSON.stringify(next));
-      else localStorage.removeItem('cached_households');
+      try {
+        if (next.length > 0) localStorage.setItem('cached_households', JSON.stringify(next));
+        else localStorage.removeItem('cached_households');
+      } catch (e) {}
       return next;
     });
     setSelectedHouseholdIds(prev => prev.filter(id => id !== household.id));
@@ -3346,8 +3352,10 @@ export default function App() {
     const idsToDelete = [...selectedHouseholdIds];
     const remainingHouseholds = households.filter(h => !idsToDelete.includes(h.id));
     setHouseholds(remainingHouseholds);
-    if (remainingHouseholds.length > 0) localStorage.setItem('cached_households', JSON.stringify(remainingHouseholds));
-    else localStorage.removeItem('cached_households');
+    try {
+      if (remainingHouseholds.length > 0) localStorage.setItem('cached_households', JSON.stringify(remainingHouseholds));
+      else localStorage.removeItem('cached_households');
+    } catch (e) {}
 
     setSelectedHouseholdIds([]);
     setIsBatchDeleteModalOpen(false);
