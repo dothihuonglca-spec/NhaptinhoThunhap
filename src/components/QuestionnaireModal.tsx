@@ -270,7 +270,7 @@ export default function QuestionnaireModal({
   ) => (
     <div className="flex flex-col gap-2 border border-slate-300 rounded p-3 bg-white">
       <div className="flex items-center justify-between">
-        <h5 className="font-bold text-slate-800 text-xs uppercase">{title} ({rows.length} mục)</h5>
+        <h5 className="font-bold text-slate-800 text-xs uppercase">{title}</h5>
         <div className="flex items-center gap-1.5">
           <button 
             type="button"
@@ -305,9 +305,9 @@ export default function QuestionnaireModal({
             <tr className="bg-sky-800 text-white text-center font-bold">
               <th rowSpan={2} className="border border-sky-900 p-1 w-10">STT</th>
               <th rowSpan={2} className="border border-sky-900 p-1 text-left min-w-[160px]">Tên nguồn thu / Sản phẩm</th>
-              <th colSpan={3} className="border border-sky-900 p-1 bg-sky-700">Tổng thu (1.000 đ)</th>
-              <th colSpan={4} className="border border-sky-900 p-1 bg-sky-900">Chi phí (1.000 đ)</th>
-              <th rowSpan={2} className="border border-sky-900 p-1 bg-emerald-800 w-28 text-right">Thu nhập (8=3-7)</th>
+              <th colSpan={3} className="border border-sky-900 p-1 bg-sky-700">Tổng thu (1000đ)</th>
+              <th colSpan={4} className="border border-sky-900 p-1 bg-sky-900">Chi phí (1000đ)</th>
+              <th rowSpan={2} className="border border-sky-900 p-1 bg-emerald-800 w-28 text-right">Thu nhập (1000đ)</th>
               <th rowSpan={2} className="border border-sky-900 p-1 w-10">Xóa</th>
             </tr>
             <tr className="bg-sky-800 text-white text-center font-semibold text-[11px]">
@@ -473,7 +473,7 @@ export default function QuestionnaireModal({
             <div>
               <span className="text-[11px] font-semibold text-sky-200 uppercase tracking-wide">Phụ lục II: Phiếu thu thập thông tin về thu nhập của hộ dân cư</span>
               <div className="flex items-center gap-2">
-                <h3 className="font-extrabold text-base">{form.householdHead} (Hộ số: {form.sttMau}) - ĐB: {form.areaCode} ({form.areaName})</h3>
+                <h3 className="font-extrabold text-base">{form.householdHead} - Hộ {form.sttMau} - ĐB: {form.areaCode} {form.areaName}</h3>
                 <span className={`px-2 py-0.5 rounded text-[11px] font-bold border inline-flex items-center gap-1 ${
                   isApproved 
                     ? 'bg-purple-100 text-purple-900 border-purple-300' 
@@ -531,7 +531,7 @@ export default function QuestionnaireModal({
           <div className="bg-amber-500 text-white px-4 py-2 flex items-center justify-between text-xs font-bold shadow-xs">
             <div className="flex items-center gap-2">
               <Lock className="w-4 h-4 shrink-0" />
-              <span>Phiếu này đã được Tổ trưởng / Quản trị viên duyệt và khóa. Bạn đang ở chế độ xem an toàn (Chỉ xem).</span>
+              <span>Phiếu này đã được Tổ trưởng / Quản trị viên duyệt và khóa. Bạn đang ở chế độ xem an toàn.</span>
             </div>
             <span className="text-[11px] bg-amber-700/60 px-2 py-0.5 rounded">Cần quyền Admin để mở khóa</span>
           </div>
@@ -561,7 +561,7 @@ export default function QuestionnaireModal({
             <strong className="truncate block font-bold">[{form.communeCode || '01'}] {form.communeName || 'Xã'}</strong>
           </div>
           <div>
-            <span className="text-[10px] text-slate-500 block">Địa bàn (Mã & Sheet):</span>
+            <span className="text-[10px] text-slate-500 block">Địa bàn:</span>
             <strong className="truncate block font-bold">ĐB {form.areaCode} - {form.areaName}</strong>
           </div>
           <div>
@@ -681,49 +681,49 @@ export default function QuestionnaireModal({
             onClick={() => setActiveTab('muc1')} 
             className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc1' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
           >
-            Mục 1: Lương, công ({income.muc1.toLocaleString()} đ)
+            Mục 1: Lương, công
           </button>
           <button 
             onClick={() => setActiveTab('muc2')} 
             className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc2' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
           >
-            Mục 2: Trồng trọt ({income.muc2.toLocaleString()} đ)
+            Mục 2: Trồng trọt
           </button>
           <button 
             onClick={() => setActiveTab('muc3')} 
             className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc3' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
           >
-            Mục 3: Chăn nuôi ({income.muc3.toLocaleString()} đ)
+            Mục 3: Chăn nuôi
           </button>
           <button 
             onClick={() => setActiveTab('muc4')} 
             className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc4' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
           >
-            Mục 4: Lâm nghiệp ({income.muc4.toLocaleString()} đ)
+            Mục 4: Lâm nghiệp
           </button>
           <button 
             onClick={() => setActiveTab('muc5')} 
             className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc5' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
           >
-            Mục 5: Thủy sản ({income.muc5.toLocaleString()} đ)
+            Mục 5: Thủy sản
           </button>
           <button 
             onClick={() => setActiveTab('muc6')} 
             className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc6' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
           >
-            Mục 6: Phi nông ({income.muc6.toLocaleString()} đ)
+            Mục 6: Phi nông
           </button>
           <button 
             onClick={() => setActiveTab('muc7')} 
             className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc7' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
           >
-            Mục 7: Thu khác ({income.muc7.toLocaleString()} đ)
+            Mục 7: Thu khác
           </button>
           <button 
             onClick={() => setActiveTab('tonghop')} 
             className={`py-2 px-3 border-b-2 cursor-pointer transition-colors bg-emerald-50 text-emerald-900 border-emerald-600 font-extrabold`}
           >
-            ★ Biểu tổng hợp hộ: {income.total.toLocaleString()} đ
+            ★ Biểu tổng hợp hộ: {income.total.toLocaleString()} (1000đ)
           </button>
         </div>
 
@@ -763,7 +763,7 @@ export default function QuestionnaireModal({
               {q.muc1_has && (
                 <div className="bg-white p-3 rounded border border-slate-300 flex flex-col gap-2">
                   <div className="flex justify-between items-center">
-                    <span className="font-bold text-slate-800">Danh sách thành viên hưởng lương, trợ cấp (ĐVT: 1.000 đồng)</span>
+                    <span className="font-bold text-slate-800">Danh sách thành viên hưởng lương, trợ cấp (1000đ)</span>
                     <div className="flex items-center gap-1.5">
                       <button 
                         type="button"
@@ -793,7 +793,7 @@ export default function QuestionnaireModal({
                         <th className="p-1.5 border border-sky-900 text-left min-w-[160px]">Mô tả công việc chính</th>
                         <th className="p-1.5 border border-sky-900 w-36">1. Tiền lương, tiền công</th>
                         <th className="p-1.5 border border-sky-900 w-36">2. Lương hưu, trợ cấp</th>
-                        <th className="p-1.5 border border-sky-900 w-32 bg-sky-900 font-extrabold text-right">Tổng (1+2)</th>
+                        <th className="p-1.5 border border-sky-900 w-32 bg-sky-900 font-extrabold text-right">Tổng (1000đ)</th>
                         <th className="p-1.5 border border-sky-900 w-10">Xóa</th>
                       </tr>
                     </thead>
@@ -870,7 +870,7 @@ export default function QuestionnaireModal({
                     </tbody>
                     <tfoot>
                       <tr className="bg-sky-100 font-black text-sky-950">
-                        <td colSpan={3} className="p-2 border border-slate-300 text-center">TỔNG SỐ CÂU 2 (CỘT 1 + CỘT 2)</td>
+                        <td colSpan={3} className="p-2 border border-slate-300 text-center">TỔNG SỐ CÂU 2</td>
                         <td className="p-2 border border-slate-300 text-right">
                           {(q.muc1_rows || []).reduce((s, r) => s + (Number(r.col1_luong) || 0), 0).toLocaleString()}
                         </td>
@@ -878,7 +878,7 @@ export default function QuestionnaireModal({
                           {(q.muc1_rows || []).reduce((s, r) => s + (Number(r.col2_troCap) || 0), 0).toLocaleString()}
                         </td>
                         <td className="p-2 border border-slate-300 text-right text-sm text-emerald-800 font-extrabold">
-                          {income.muc1.toLocaleString()} (1.000 đồng)
+                          {income.muc1.toLocaleString()} (1000đ)
                         </td>
                         <td className="p-2 border border-slate-300"></td>
                       </tr>
@@ -922,7 +922,7 @@ export default function QuestionnaireModal({
               {q.muc2_has && (
                 <div className="flex flex-col gap-3">
                   {renderProductionTable(
-                    "1. Cây trồng các loại (Lúa, ngô, khoai, cây ăn quả, cây CN...)",
+                    "1. Cây trồng các loại",
                     q.muc2_cayTrongRows || [],
                     rows => updateQ(prev => ({ ...prev, muc2_cayTrongRows: rows })),
                     'muc2'
@@ -933,15 +933,15 @@ export default function QuestionnaireModal({
                       <h5 className="font-bold text-slate-800 text-xs uppercase">2. Nhân giống và chăm sóc giống</h5>
                       <div className="grid grid-cols-3 gap-2">
                         <div>
-                          <label className="text-[11px] text-slate-600">Thu bán (Cột 1):</label>
+                          <label className="text-[11px] text-slate-600">Thu bán:</label>
                           <input type="number" value={q.muc2_giong?.col1 === 0 ? '' : q.muc2_giong?.col1 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_giong: { ...prev.muc2_giong, col1: e.target.value === '' ? 0 : Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                         <div>
-                          <label className="text-[11px] text-slate-600">Tự dùng (Cột 2):</label>
+                          <label className="text-[11px] text-slate-600">Tự dùng:</label>
                           <input type="number" value={q.muc2_giong?.col2 === 0 ? '' : q.muc2_giong?.col2 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_giong: { ...prev.muc2_giong, col2: e.target.value === '' ? 0 : Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                         <div>
-                          <label className="text-[11px] text-slate-600">Tổng chi phí (Cột 7):</label>
+                          <label className="text-[11px] text-slate-600">Tổng chi phí:</label>
                           <input type="number" value={((q.muc2_giong?.col4 || 0) + (q.muc2_giong?.col5 || 0) + (q.muc2_giong?.col6 || 0)) === 0 ? '' : ((q.muc2_giong?.col4 || 0) + (q.muc2_giong?.col5 || 0) + (q.muc2_giong?.col6 || 0))} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_giong: { ...prev.muc2_giong, col4: e.target.value === '' ? 0 : Number(e.target.value), col5: 0, col6: 0 } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                       </div>
@@ -951,29 +951,29 @@ export default function QuestionnaireModal({
                       <h5 className="font-bold text-slate-800 text-xs uppercase">3. Sản phẩm phụ và thu nhặt từ trồng trọt</h5>
                       <div className="grid grid-cols-3 gap-2">
                         <div>
-                          <label className="text-[11px] text-slate-600">Thu bán (Cột 1):</label>
+                          <label className="text-[11px] text-slate-600">Thu bán:</label>
                           <input type="number" value={q.muc2_sanPhamPhu?.col1 === 0 ? '' : q.muc2_sanPhamPhu?.col1 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_sanPhamPhu: { ...prev.muc2_sanPhamPhu, col1: e.target.value === '' ? 0 : Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                         <div>
-                          <label className="text-[11px] text-slate-600">Tự dùng (Cột 2):</label>
+                          <label className="text-[11px] text-slate-600">Tự dùng:</label>
                           <input type="number" value={q.muc2_sanPhamPhu?.col2 === 0 ? '' : q.muc2_sanPhamPhu?.col2 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_sanPhamPhu: { ...prev.muc2_sanPhamPhu, col2: e.target.value === '' ? 0 : Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                         <div>
-                          <label className="text-[11px] text-slate-600">Chi khác (Cột 6):</label>
+                          <label className="text-[11px] text-slate-600">Chi khác:</label>
                           <input type="number" value={q.muc2_sanPhamPhu?.col6 === 0 ? '' : q.muc2_sanPhamPhu?.col6 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_sanPhamPhu: { ...prev.muc2_sanPhamPhu, col6: e.target.value === '' ? 0 : Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                       </div>
                     </div>
 
                     <div className="bg-white p-3 rounded border border-slate-300 flex flex-col gap-2">
-                      <h5 className="font-bold text-slate-800 text-xs uppercase">4. Dịch vụ trồng trọt (Cày bừa, tưới tiêu, tuốt lúa...)</h5>
+                      <h5 className="font-bold text-slate-800 text-xs uppercase">4. Dịch vụ trồng trọt</h5>
                       <div className="grid grid-cols-2 gap-2">
                         <div>
-                          <label className="text-[11px] text-slate-600">Doanh thu dịch vụ (Cột 3):</label>
+                          <label className="text-[11px] text-slate-600">Doanh thu dịch vụ:</label>
                           <input type="number" value={q.muc2_dichVu?.col3 === 0 ? '' : q.muc2_dichVu?.col3 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_dichVu: { ...prev.muc2_dichVu, col3: e.target.value === '' ? 0 : Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                         <div>
-                          <label className="text-[11px] text-slate-600">Chi phí dịch vụ (Cột 6):</label>
+                          <label className="text-[11px] text-slate-600">Chi phí dịch vụ:</label>
                           <input type="number" value={q.muc2_dichVu?.col6 === 0 ? '' : q.muc2_dichVu?.col6 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_dichVu: { ...prev.muc2_dichVu, col6: e.target.value === '' ? 0 : Number(e.target.value) } }))} className="w-full p-1 border rounded text-right font-medium" />
                         </div>
                       </div>
@@ -982,15 +982,15 @@ export default function QuestionnaireModal({
                     <div className="bg-white p-3 rounded border border-slate-300 flex flex-col gap-2">
                       <h5 className="font-bold text-slate-800 text-xs uppercase">5. Tiền đền bù / hỗ trợ thiệt hại dịch bệnh, thiên tai</h5>
                       <div>
-                        <label className="text-[11px] text-slate-600">Số tiền nhận được (Cột 8):</label>
+                        <label className="text-[11px] text-slate-600">Số tiền nhận được:</label>
                         <input type="number" value={q.muc2_denBu === 0 ? '' : q.muc2_denBu || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc2_denBu: e.target.value === '' ? 0 : Number(e.target.value) }))} className="w-full p-1 border rounded text-right font-bold text-emerald-800" />
                       </div>
                     </div>
                   </div>
 
                   <div className="bg-emerald-100 p-2.5 rounded border border-emerald-300 flex justify-between items-center font-bold text-emerald-950">
-                    <span>TỔNG THU NHẬP MỤC 2 (TRỒNG TRỌT):</span>
-                    <span className="text-sm font-black">{income.muc2.toLocaleString()} (1.000 đồng)</span>
+                    <span>TỔNG THU NHẬP MỤC 2:</span>
+                    <span className="text-sm font-black">{income.muc2.toLocaleString()} (1000đ)</span>
                   </div>
                 </div>
               )}
@@ -1019,14 +1019,14 @@ export default function QuestionnaireModal({
 
               {q.muc3_has && (
                 <div className="flex flex-col gap-3">
-                  {renderProductionTable("1. Gia súc (Lợn, trâu, bò, ngựa, dê...)", q.muc3_giaSucRows || [], rows => updateQ(prev => ({ ...prev, muc3_giaSucRows: rows })), 'muc3')}
-                  {renderProductionTable("2. Gia cầm (Gà, vịt, ngan, ngỗng...)", q.muc3_giaCamRows || [], rows => updateQ(prev => ({ ...prev, muc3_giaCamRows: rows })), 'muc3')}
-                  {renderProductionTable("3. Chăn nuôi khác (Chó, thỏ, trăn, rắn...)", q.muc3_khacRows || [], rows => updateQ(prev => ({ ...prev, muc3_khacRows: rows })), 'muc3')}
-                  {renderProductionTable("4. Sản phẩm không qua giết mổ (Trứng, sữa, mật ong, kén tằm...)", q.muc3_khongGietMoRows || [], rows => updateQ(prev => ({ ...prev, muc3_khongGietMoRows: rows })), 'muc3')}
+                  {renderProductionTable("1. Gia súc", q.muc3_giaSucRows || [], rows => updateQ(prev => ({ ...prev, muc3_giaSucRows: rows })), 'muc3')}
+                  {renderProductionTable("2. Gia cầm", q.muc3_giaCamRows || [], rows => updateQ(prev => ({ ...prev, muc3_giaCamRows: rows })), 'muc3')}
+                  {renderProductionTable("3. Chăn nuôi khác", q.muc3_khacRows || [], rows => updateQ(prev => ({ ...prev, muc3_khacRows: rows })), 'muc3')}
+                  {renderProductionTable("4. Sản phẩm không qua giết mổ", q.muc3_khongGietMoRows || [], rows => updateQ(prev => ({ ...prev, muc3_khongGietMoRows: rows })), 'muc3')}
                   
                   <div className="bg-emerald-100 p-2.5 rounded border border-emerald-300 flex justify-between items-center font-bold text-emerald-950">
-                    <span>TỔNG THU NHẬP MỤC 3 (CHĂN NUÔI):</span>
-                    <span className="text-sm font-black">{income.muc3.toLocaleString()} (1.000 đồng)</span>
+                    <span>TỔNG THU NHẬP MỤC 3:</span>
+                    <span className="text-sm font-black">{income.muc3.toLocaleString()} (1000đ)</span>
                   </div>
                 </div>
               )}
@@ -1055,10 +1055,10 @@ export default function QuestionnaireModal({
 
               {q.muc4_has && (
                 <div className="flex flex-col gap-3">
-                  {renderProductionTable("1. Khai thác, thu nhặt lâm sản (Quế, hồi, thông, gỗ, tre luồng, củi...)", q.muc4_khaiThacRows || [], rows => updateQ(prev => ({ ...prev, muc4_khaiThacRows: rows })), 'muc4')}
+                  {renderProductionTable("1. Khai thác, thu nhặt lâm sản", q.muc4_khaiThacRows || [], rows => updateQ(prev => ({ ...prev, muc4_khaiThacRows: rows })), 'muc4')}
                   <div className="bg-emerald-100 p-2.5 rounded border border-emerald-300 flex justify-between items-center font-bold text-emerald-950">
-                    <span>TỔNG THU NHẬP MỤC 4 (LÂM NGHIỆP):</span>
-                    <span className="text-sm font-black">{income.muc4.toLocaleString()} (1.000 đồng)</span>
+                    <span>TỔNG THU NHẬP MỤC 4:</span>
+                    <span className="text-sm font-black">{income.muc4.toLocaleString()} (1000đ)</span>
                   </div>
                 </div>
               )}
@@ -1087,11 +1087,11 @@ export default function QuestionnaireModal({
 
               {q.muc5_has && (
                 <div className="flex flex-col gap-3">
-                  {renderProductionTable("1. Nuôi trồng thủy sản (Cá, tôm, cua...)", q.muc5_nuoiTrongRows || [], rows => updateQ(prev => ({ ...prev, muc5_nuoiTrongRows: rows })), 'muc5')}
-                  {renderProductionTable("2. Đánh bắt thủy sản (Cá, tôm, thủy sản sông biển...)", q.muc5_danhBatRows || [], rows => updateQ(prev => ({ ...prev, muc5_danhBatRows: rows })), 'muc5')}
+                  {renderProductionTable("1. Nuôi trồng thủy sản", q.muc5_nuoiTrongRows || [], rows => updateQ(prev => ({ ...prev, muc5_nuoiTrongRows: rows })), 'muc5')}
+                  {renderProductionTable("2. Đánh bắt thủy sản", q.muc5_danhBatRows || [], rows => updateQ(prev => ({ ...prev, muc5_danhBatRows: rows })), 'muc5')}
                   <div className="bg-emerald-100 p-2.5 rounded border border-emerald-300 flex justify-between items-center font-bold text-emerald-950">
-                    <span>TỔNG THU NHẬP MỤC 5 (THỦY SẢN):</span>
-                    <span className="text-sm font-black">{income.muc5.toLocaleString()} (1.000 đồng)</span>
+                    <span>TỔNG THU NHẬP MỤC 5:</span>
+                    <span className="text-sm font-black">{income.muc5.toLocaleString()} (1000đ)</span>
                   </div>
                 </div>
               )}
@@ -1128,7 +1128,7 @@ export default function QuestionnaireModal({
                         onClick={() => openCatalogFor('muc6')}
                         className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded font-bold text-xs flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
                       >
-                        <BookOpen className="w-3.5 h-3.5" /> Tra cứu ngành nghề (27 loại)
+                        <BookOpen className="w-3.5 h-3.5" /> Tra cứu ngành nghề
                       </button>
                       <button 
                         type="button"
@@ -1156,7 +1156,7 @@ export default function QuestionnaireModal({
                           <th className="p-1 border border-sky-900 w-24">5. Năng lượng</th>
                           <th className="p-1 border border-sky-900 w-24">6. Chi khác</th>
                           <th className="p-1 border border-sky-900 w-24 bg-sky-900 font-bold">7=4+5+6</th>
-                          <th className="p-1 border border-sky-900 w-28 bg-emerald-800 text-right">Thu nhập (8=3-7)</th>
+                          <th className="p-1 border border-sky-900 w-28 bg-emerald-800 text-right">Thu nhập (1000đ)</th>
                           <th className="p-1 border border-sky-900 w-10">Xóa</th>
                         </tr>
                       </thead>
@@ -1233,8 +1233,8 @@ export default function QuestionnaireModal({
                   </div>
 
                   <div className="bg-emerald-100 p-2.5 rounded border border-emerald-300 flex justify-between items-center font-bold text-emerald-950 mt-2">
-                    <span>TỔNG THU NHẬP MỤC 6 (PHI NÔNG NGHIỆP):</span>
-                    <span className="text-sm font-black">{income.muc6.toLocaleString()} (1.000 đồng)</span>
+                    <span>TỔNG THU NHẬP MỤC 6:</span>
+                    <span className="text-sm font-black">{income.muc6.toLocaleString()} (1000đ)</span>
                   </div>
                 </div>
               )}
@@ -1245,7 +1245,7 @@ export default function QuestionnaireModal({
           {activeTab === 'muc7' && (
             <div className="bg-white p-4 rounded border border-slate-300 flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <h4 className="font-bold text-slate-900 text-sm uppercase">MỤC 7: THU NHẬP KHÁC (ĐVT: 1.000 đồng)</h4>
+                <h4 className="font-bold text-slate-900 text-sm uppercase">MỤC 7: THU NHẬP KHÁC (1000đ)</h4>
                 <button 
                   type="button"
                   onClick={() => openCatalogFor('muc7')}
@@ -1263,7 +1263,7 @@ export default function QuestionnaireModal({
                     <input type="number" value={q.muc7_1_1 === 0 ? '' : q.muc7_1_1 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc7_1_1: e.target.value === '' ? 0 : Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
                   </div>
                   <div>
-                    <label className="text-slate-600 text-[11px] block">1.2 Trợ cấp xã hội (người có công, hộ nghèo, bảo trợ, thiên tai...):</label>
+                    <label className="text-slate-600 text-[11px] block">1.2 Trợ cấp xã hội:</label>
                     <input type="number" value={q.muc7_1_2 === 0 ? '' : q.muc7_1_2 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc7_1_2: e.target.value === '' ? 0 : Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
                   </div>
                   <div>
@@ -1283,15 +1283,15 @@ export default function QuestionnaireModal({
                     <input type="number" value={q.muc7_2_2 === 0 ? '' : q.muc7_2_2 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc7_2_2: e.target.value === '' ? 0 : Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
                   </div>
                   <div>
-                    <label className="text-slate-600 text-[11px] block">3. Thu nhập khác (Trúng xổ số, vui chơi có thưởng...):</label>
+                    <label className="text-slate-600 text-[11px] block">3. Thu nhập khác:</label>
                     <input type="number" value={q.muc7_3 === 0 ? '' : q.muc7_3 || ''} onFocus={e => e.target.select()} onChange={e => updateQ(prev => ({ ...prev, muc7_3: e.target.value === '' ? 0 : Number(e.target.value) }))} className="w-full p-1.5 border rounded text-right font-medium bg-white" />
                   </div>
                 </div>
               </div>
 
               <div className="bg-emerald-100 p-2.5 rounded border border-emerald-300 flex justify-between items-center font-bold text-emerald-950">
-                <span>TỔNG THU NHẬP MỤC 7 (THU KHÁC):</span>
-                <span className="text-sm font-black">{income.muc7.toLocaleString()} (1.000 đồng)</span>
+                <span>TỔNG THU NHẬP MỤC 7:</span>
+                <span className="text-sm font-black">{income.muc7.toLocaleString()} (1000đ)</span>
               </div>
             </div>
           )}
@@ -1301,44 +1301,44 @@ export default function QuestionnaireModal({
             <div className="bg-white p-5 rounded border border-slate-300 flex flex-col gap-4">
               <div className="text-center border-b pb-3">
                 <h3 className="font-black text-slate-900 text-base uppercase">BIỂU TỔNG HỢP THU NHẬP CỦA HỘ NĂM 2026</h3>
-                <p className="text-xs text-slate-600 mt-1">Đơn vị tính: 1.000 đồng (Tự động tổng hợp từ 7 mục theo Phụ lục II)</p>
+                <p className="text-xs text-slate-600 mt-1">Đơn vị tính: 1000đ</p>
               </div>
 
               <div className="border border-slate-300 rounded overflow-hidden">
                 <table className="w-full border-collapse text-xs">
                   <thead>
                     <tr className="bg-sky-800 text-white font-bold">
-                      <th className="p-2 border border-sky-900 text-left">Nguồn thu (Phụ lục II)</th>
-                      <th className="p-2 border border-sky-900 w-44 text-right">Tổng thu nhập (1.000 đ)</th>
+                      <th className="p-2 border border-sky-900 text-left">Nguồn thu</th>
+                      <th className="p-2 border border-sky-900 w-44 text-right">Tổng thu nhập (1000đ)</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr>
-                      <td className="p-2 border border-slate-300 font-medium">1. Thu nhập từ tiền lương, tiền công (Câu 2 Mục 1)</td>
+                      <td className="p-2 border border-slate-300 font-medium">1. Thu nhập từ tiền lương, tiền công</td>
                       <td className="p-2 border border-slate-300 text-right font-bold text-slate-900">{income.muc1.toLocaleString()}</td>
                     </tr>
                     <tr className="bg-slate-50/50">
-                      <td className="p-2 border border-slate-300 font-medium">2. Thu nhập từ trồng trọt (Câu 2 Mục 2)</td>
+                      <td className="p-2 border border-slate-300 font-medium">2. Thu nhập từ trồng trọt</td>
                       <td className="p-2 border border-slate-300 text-right font-bold text-slate-900">{income.muc2.toLocaleString()}</td>
                     </tr>
                     <tr>
-                      <td className="p-2 border border-slate-300 font-medium">3. Thu nhập từ chăn nuôi (Câu 2 Mục 3)</td>
+                      <td className="p-2 border border-slate-300 font-medium">3. Thu nhập từ chăn nuôi</td>
                       <td className="p-2 border border-slate-300 text-right font-bold text-slate-900">{income.muc3.toLocaleString()}</td>
                     </tr>
                     <tr className="bg-slate-50/50">
-                      <td className="p-2 border border-slate-300 font-medium">4. Thu nhập từ lâm nghiệp (Câu 2 Mục 4)</td>
+                      <td className="p-2 border border-slate-300 font-medium">4. Thu nhập từ lâm nghiệp</td>
                       <td className="p-2 border border-slate-300 text-right font-bold text-slate-900">{income.muc4.toLocaleString()}</td>
                     </tr>
                     <tr>
-                      <td className="p-2 border border-slate-300 font-medium">5. Thu nhập từ thủy sản (Câu 2 Mục 5)</td>
+                      <td className="p-2 border border-slate-300 font-medium">5. Thu nhập từ thủy sản</td>
                       <td className="p-2 border border-slate-300 text-right font-bold text-slate-900">{income.muc5.toLocaleString()}</td>
                     </tr>
                     <tr className="bg-slate-50/50">
-                      <td className="p-2 border border-slate-300 font-medium">6. Thu nhập từ hoạt động sản xuất kinh doanh phi nông, lâm, thủy sản (Câu 2 Mục 6)</td>
+                      <td className="p-2 border border-slate-300 font-medium">6. Thu nhập từ sản xuất kinh doanh phi nông nghiệp</td>
                       <td className="p-2 border border-slate-300 text-right font-bold text-slate-900">{income.muc6.toLocaleString()}</td>
                     </tr>
                     <tr>
-                      <td className="p-2 border border-slate-300 font-medium">7. Thu nhập khác (Câu 2 Mục 7)</td>
+                      <td className="p-2 border border-slate-300 font-medium">7. Thu nhập khác</td>
                       <td className="p-2 border border-slate-300 text-right font-bold text-slate-900">{income.muc7.toLocaleString()}</td>
                     </tr>
                     <tr className="bg-emerald-100 font-black text-emerald-950 text-sm">
@@ -1376,7 +1376,7 @@ export default function QuestionnaireModal({
                   </div>
                   <div className="bg-white p-2 rounded border border-amber-200 col-span-2 md:col-span-1">
                     <span className="text-slate-500 block text-[11px] font-medium">Tổng thu nhập hộ:</span>
-                    <strong className="text-sm font-black text-emerald-900">{income.total.toLocaleString()} (1.000 đ)</strong>
+                    <strong className="text-sm font-black text-emerald-900">{income.total.toLocaleString()} (1000đ)</strong>
                   </div>
                 </div>
 
@@ -1406,7 +1406,7 @@ export default function QuestionnaireModal({
                     />
                   </div>
                   <p className="font-bold text-slate-900 mt-2">Điều tra viên</p>
-                  <p className="text-[10px] text-slate-500 italic mt-6">(Ký, ghi rõ họ tên)</p>
+                  <p className="text-[10px] text-slate-500 italic mt-6">Ký, ghi rõ họ tên</p>
                   <input 
                     type="text" 
                     placeholder="Nhập họ tên điều tra viên..." 
@@ -1427,7 +1427,7 @@ export default function QuestionnaireModal({
             <div className="flex items-center gap-2">
               <span className="font-bold text-slate-700">Tổng thu nhập hộ:</span>
               <span className="font-black text-emerald-800 text-sm bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
-                {income.total.toLocaleString()} (1.000 đồng)
+                {income.total.toLocaleString()} (1000đ)
               </span>
             </div>
 
@@ -1483,7 +1483,7 @@ export default function QuestionnaireModal({
                     title="Mở khóa để cho phép điều tra viên cập nhật lại"
                   >
                     <Unlock className="w-4 h-4" />
-                    <span>Mở Khóa Phiếu (Admin)</span>
+                    <span>Mở Khóa Phiếu</span>
                   </button>
                 )
               )}

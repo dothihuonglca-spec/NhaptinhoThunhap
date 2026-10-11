@@ -128,7 +128,7 @@ export default function IndustrialSurveyPage({
             .map(d => ({ ...(d.data() as EnterpriseSurvey01), id: d.id }))
             .filter(d => !DEMO_IDS.includes(d.id));
           setEnterprises(loadedEnts);
-          localStorage.setItem('cached_enterprises_01', JSON.stringify(loadedEnts));
+          try { localStorage.setItem('cached_enterprises_01', JSON.stringify(loadedEnts)); } catch (e) {}
 
           entSnap.docs.forEach(async d => {
             if (DEMO_IDS.includes(d.id)) {
@@ -147,7 +147,7 @@ export default function IndustrialSurveyPage({
             .map(d => ({ ...(d.data() as IndividualEstablishment02), id: d.id }))
             .filter(d => !DEMO_IDS.includes(d.id));
           setEstablishments(loadedEsts);
-          localStorage.setItem('cached_establishments_02', JSON.stringify(loadedEsts));
+          try { localStorage.setItem('cached_establishments_02', JSON.stringify(loadedEsts)); } catch (e) {}
 
           estSnap.docs.forEach(async d => {
             if (DEMO_IDS.includes(d.id)) {
@@ -164,7 +164,7 @@ export default function IndustrialSurveyPage({
         if (!sumSnap.empty) {
           const loadedSums: IndustrialSummaryReport[] = sumSnap.docs.map(d => ({ ...(d.data() as IndustrialSummaryReport), id: d.id }));
           setSummaries(loadedSums);
-          localStorage.setItem('cached_industrial_summaries', JSON.stringify(loadedSums));
+          try { localStorage.setItem('cached_industrial_summaries', JSON.stringify(loadedSums)); } catch (e) {}
         }
       } catch (err: any) {
         console.warn('Lỗi đọc Firestore điều tra công nghiệp, sử dụng offline cache:', err);

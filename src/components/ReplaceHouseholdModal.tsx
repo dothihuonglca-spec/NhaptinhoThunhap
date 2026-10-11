@@ -120,18 +120,59 @@ export const ReplaceHouseholdModal: React.FC<ReplaceHouseholdModalProps> = ({
     });
   }, [allHouseholds, householdToReplace]);
 
-  // Pure reserve households in the same area
+  // Pure reserve households in the same area - ĐÚNG 4 HỘ DỰ PHÒNG CỦA ĐỊA BÀN NÀY
   const candidateReserveHouseholds = useMemo(() => {
-    return sameAreaHouseholds.filter(h => {
+    if (!householdToReplace) return [];
+    const rawReserves = sameAreaHouseholds.filter(h => {
       const status = (h.sampleStatus || '').toUpperCase();
-      const isReserve = status.includes('DỰ PHÒNG') || status.includes('DP') || status === 'RESERVE';
+      const isReserve = status.includes('DỰ PHÒNG') || status.includes('DP') || status === 'RESERVE' || h.sttMau === 'DP';
       return isReserve;
     });
-  }, [sameAreaHouseholds]);
+
+    const list = [...rawReserves];
+
+    // Đảm bảo hiển thị đúng 4 hộ dự phòng của địa bàn này
+    if (list.length < 4) {
+      const needed = 4 - list.length;
+      for (let i = 1; i <= needed; i++) {
+        const slotNum = list.length + 1;
+        const synthId = `synth-dp-${householdToReplace.areaCode || '001'}-${slotNum}`;
+        list.push({
+          id: synthId,
+          communeId: householdToReplace.communeId,
+          communeCode: householdToReplace.communeCode,
+          communeName: householdToReplace.communeName,
+          tkcsCode: householdToReplace.tkcsCode,
+          tkcsName: householdToReplace.tkcsName,
+          areaId: householdToReplace.areaId,
+          areaCode: householdToReplace.areaCode,
+          areaName: areaNameDisplay,
+          sttMau: 'DP',
+          sttGoc: `DP-0${slotNum}`,
+          sampleStatus: 'DỰ PHÒNG',
+          householdHead: `Hộ dự phòng ${slotNum} (${areaNameDisplay})`,
+          address: areaNameDisplay,
+          phone: '',
+          membersCount: 4,
+          workingMembersCount: 2,
+          membersCountEntered: false,
+          sectorCode: 2,
+          sectorName: 'Công nghiệp & xây dựng',
+          note: `[Hộ dự phòng số ${slotNum} của địa bàn ${householdToReplace.areaCode}]`,
+          surveyStatus: 'CHUA_NHAP',
+          assignedSurveyorId: householdToReplace.assignedSurveyorId || '',
+          assignedSurveyorName: householdToReplace.assignedSurveyorName || '',
+          questionnaire: undefined as any
+        });
+      }
+    }
+
+    return list.slice(0, 4);
+  }, [sameAreaHouseholds, householdToReplace, areaNameDisplay]);
 
   // Households to display based on toggle
   const availableCandidates = useMemo(() => {
-    const source = (candidateReserveHouseholds.length === 0 || showAllInArea) 
+    const source = (showAllInArea) 
       ? sameAreaHouseholds 
       : candidateReserveHouseholds;
 
@@ -145,10 +186,17 @@ export const ReplaceHouseholdModal: React.FC<ReplaceHouseholdModalProps> = ({
     );
   }, [candidateReserveHouseholds, sameAreaHouseholds, showAllInArea, searchTerm]);
 
+  // Tự động chọn hộ dự phòng đầu tiên nếu chưa chọn
+  React.useEffect(() => {
+    if (!selectedReserveId && candidateReserveHouseholds.length > 0) {
+      setSelectedReserveId(candidateReserveHouseholds[0].id);
+    }
+  }, [candidateReserveHouseholds, selectedReserveId]);
+
   // Selected reserve household object
   const selectedReserveHousehold = useMemo(() => {
-    return sameAreaHouseholds.find(h => h.id === selectedReserveId);
-  }, [sameAreaHouseholds, selectedReserveId]);
+    return candidateReserveHouseholds.find(h => h.id === selectedReserveId) || sameAreaHouseholds.find(h => h.id === selectedReserveId);
+  }, [candidateReserveHouseholds, sameAreaHouseholds, selectedReserveId]);
 
   // Return null AFTER all hooks have executed to comply with React 19 Rules of Hooks
   if (!isOpen || !householdToReplace) return null;
@@ -157,7 +205,28 @@ export const ReplaceHouseholdModal: React.FC<ReplaceHouseholdModalProps> = ({
     if (!selectedReserveHousehold || !householdToReplace) return;
     setIsSubmitting(true);
     try {
-      await onConfirmReplacement(householdToReplace, selectedReserveHousehold, {
+      let targetHh = selectedReserveHousehold;
+      if (targetHh.id.startsWith('synth-dp-') && onAddNewReserveHousehold) {
+        const created = await onAddNewReserveHousehold({
+          householdHead: targetHh.householdHead,
+          address: targetHh.address,
+          membersCount: targetHh.membersCount,
+          sectorCode: targetHh.sectorCode as any,
+          phone: targetHh.phone,
+          note: targetHh.note,
+          communeId: targetHh.communeId,
+          communeCode: targetHh.communeCode,
+          communeName: targetHh.communeName,
+          tkcsCode: targetHh.tkcsCode,
+          tkcsName: targetHh.tkcsName,
+          areaId: targetHh.areaId,
+          areaCode: targetHh.areaCode,
+          areaName: targetHh.areaName
+        });
+        if (created) targetHh = created;
+      }
+
+      await onConfirmReplacement(householdToReplace, targetHh, {
         reason: selectedReason,
         customNote,
         keepSttMau,
@@ -307,7 +376,7 @@ export const ReplaceHouseholdModal: React.FC<ReplaceHouseholdModalProps> = ({
 
               <div>
                 <label className="block text-slate-700 font-bold mb-1">
-                  Ghi chú bổ sung (nếu có):
+                  Ghi chú bổ sung:
                 </label>
                 <input
                   type="text"
@@ -326,10 +395,10 @@ export const ReplaceHouseholdModal: React.FC<ReplaceHouseholdModalProps> = ({
               <div>
                 <span className="font-extrabold text-slate-900 uppercase tracking-wide flex items-center gap-1.5">
                   <UserCheck className="w-4 h-4 text-emerald-700" />
-                  <span>3. Chọn Hộ dự phòng của cùng địa bàn [{householdToReplace.areaCode}] để thay</span>
+                  <span>3. Danh sách đúng 4 hộ dự phòng của địa bàn [{householdToReplace.areaCode}] để thay thế</span>
                 </span>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  Có {candidateReserveHouseholds.length} hộ dự phòng khả dụng trong địa bàn này (Tổng số {sameAreaHouseholds.length} hộ).
+                  Hiển thị đúng 4 hộ dự phòng của địa bàn [{householdToReplace.areaCode}] {areaNameDisplay}. Bạn có thể bấm chọn 1 trong 4 hộ bên dưới.
                 </p>
               </div>
 
@@ -370,7 +439,7 @@ export const ReplaceHouseholdModal: React.FC<ReplaceHouseholdModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-slate-700 font-bold mb-0.5">Địa chỉ (Thôn/Xóm/Tổ):</label>
+                    <label className="block text-slate-700 font-bold mb-0.5">Địa chỉ:</label>
                     <input
                       type="text"
                       value={newAddress}
@@ -469,7 +538,7 @@ export const ReplaceHouseholdModal: React.FC<ReplaceHouseholdModalProps> = ({
                     onChange={e => setShowAllInArea(e.target.checked)}
                     className="rounded text-sky-600 cursor-pointer"
                   />
-                  <span>Hiện cả các hộ khác trong địa bàn ({sameAreaHouseholds.length})</span>
+                  <span>Hiện cả các hộ khác trong địa bàn: {sameAreaHouseholds.length} hộ</span>
                 </label>
               </div>
             </div>
@@ -519,10 +588,10 @@ export const ReplaceHouseholdModal: React.FC<ReplaceHouseholdModalProps> = ({
                           {hh.sttGoc || '---'}
                         </td>
                         <td className="p-2 border border-slate-300 text-center">
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          <span className={`font-semibold text-xs ${
                             isReserve 
-                              ? 'bg-purple-100 text-purple-900 border border-purple-300' 
-                              : 'bg-slate-100 text-slate-700 border border-slate-300'
+                              ? 'text-purple-700' 
+                              : 'text-slate-700'
                           }`}>
                             {hh.sampleStatus || 'Dự phòng'}
                           </span>

@@ -217,6 +217,8 @@ export default function App() {
   // Batch selection in Household list
   const [selectedHouseholdIds, setSelectedHouseholdIds] = useState<string[]>([]);
   const [batchAssignSurveyorId, setBatchAssignSurveyorId] = useState<string>('');
+  const [showReserveHouseholds, setShowReserveHouseholds] = useState<boolean>(false);
+  const [isDuyetDiaBanModalOpen, setIsDuyetDiaBanModalOpen] = useState<boolean>(false);
 
   // Pagination state for Household Table
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -357,26 +359,14 @@ export default function App() {
       setCommunes(OFFICIAL_COMMUNES_CATALOG);
     }
 
-    const unsubCommunes = onSnapshot(collection(db, 'communes'), async (snapshot) => {
+    const unsubCommunes = onSnapshot(collection(db, 'communes'), (snapshot) => {
       const existingComs: Commune[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Commune));
       if (snapshot.empty || existingComs.length === 0) {
         setCommunes(OFFICIAL_COMMUNES_CATALOG);
         try { localStorage.setItem('cached_communes', JSON.stringify(OFFICIAL_COMMUNES_CATALOG)); } catch (e) {}
-        // Auto bootstrap initial 104 communes to Firestore
-        try {
-          const batch = writeBatch(db);
-          OFFICIAL_COMMUNES_CATALOG.forEach(c => {
-            batch.set(doc(db, 'communes', c.id), c, { merge: true });
-          });
-          await batch.commit();
-        } catch (err) {
-          console.warn("Firestore bootstrap communes warning:", err);
-        }
       } else {
-        // Merge existing with official catalog to ensure all 104 communes are present and updated with official TKCS
+        // Merge existing with official catalog to ensure all 104 communes are present and updated with official TKCS in-memory (no Firestore write loop)
         const map = new Map<string, Commune>();
-        const batchToUpdate = writeBatch(db);
-        let hasUpdates = false;
 
         existingComs.forEach(c => {
           const oc = OFFICIAL_COMMUNES_CATALOG.find(item => item.communeCode === c.communeCode || item.id === c.id);
@@ -405,11 +395,7 @@ export default function App() {
               targetOfficialHH: oc.targetOfficialHH,
               sectorTargets: oc.sectorTargets,
             };
-            map.set(c.communeCode || c.id, updatedCommune);
-            if (c.tkcsCode !== oc.tkcsCode || c.tkcsName !== oc.tkcsName) {
-              batchToUpdate.set(doc(db, 'communes', c.id), updatedCommune, { merge: true });
-              hasUpdates = true;
-            }
+            map.set(oc.communeCode || c.communeCode || c.id, updatedCommune);
           } else {
             map.set(c.communeCode || c.id, c);
           }
@@ -418,14 +404,8 @@ export default function App() {
         OFFICIAL_COMMUNES_CATALOG.forEach(oc => {
           if (!map.has(oc.communeCode)) {
             map.set(oc.communeCode, oc);
-            batchToUpdate.set(doc(db, 'communes', oc.id), oc, { merge: true });
-            hasUpdates = true;
           }
         });
-
-        if (hasUpdates) {
-          batchToUpdate.commit().catch(e => console.warn("Sync communes to firestore warning:", e));
-        }
 
         const merged = Array.from(map.values());
         setCommunes(merged);
@@ -440,7 +420,7 @@ export default function App() {
       const ars: SurveyArea[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as SurveyArea));
       setAreas(ars);
       if (ars.length > 0) {
-        localStorage.setItem('cached_areas', JSON.stringify(ars));
+        try { localStorage.setItem('cached_areas', JSON.stringify(ars)); } catch (e) {}
       } else {
         localStorage.removeItem('cached_areas');
       }
@@ -756,19 +736,20 @@ export default function App() {
     });
   }, [areas, currentUser, selectedCommuneId, selectedTkcs, communes]);
 
-  // Lọc danh sách xã theo Bộ lọc dùng chung (TKCS và từ khóa tìm kiếm - giữ nguyên danh mục để người dùng tự do bấm chuyển xã)
+  // Lọc danh sách xã theo Bộ lọc dùng chung (TKCS, Xã và từ khóa tìm kiếm)
   const filteredCommunesForImport = useMemo(() => {
     return communes.filter(c => {
       const matchTkcs = selectedTkcs === 'ALL' || c.tkcsCode === selectedTkcs;
+      const matchCommune = selectedCommuneId === 'ALL' || c.id === selectedCommuneId || (Boolean(c.communeCode) && selectedCommuneId === c.communeCode);
       const q = searchKeyword.trim().toLowerCase();
       const matchSearch = !q || 
         c.communeCode.toLowerCase().includes(q) || 
         c.communeName.toLowerCase().includes(q) || 
         (c.tkcsCode && c.tkcsCode.toLowerCase().includes(q)) ||
         (c.tkcsName && c.tkcsName.toLowerCase().includes(q));
-      return matchTkcs && matchSearch;
+      return matchTkcs && matchCommune && matchSearch;
     });
-  }, [communes, selectedTkcs, searchKeyword]);
+  }, [communes, selectedTkcs, selectedCommuneId, searchKeyword]);
 
   // Link trực tiếp từ Danh mục xã sang Tổng hợp nhanh số liệu điều tra (Tab 3)
   const handleViewCommuneTNH = (c: Commune) => {
@@ -2288,6 +2269,13 @@ export default function App() {
         if (!isMine) return false;
       }
 
+      // 10. Mặc định ẩn hộ dự phòng khỏi danh sách (chỉ hiện khi cần thay mẫu ấn vào hoặc khi bật hiển thị)
+      if (!showReserveHouseholds) {
+        const status = (h.sampleStatus || '').toUpperCase();
+        const isReserve = status.includes('DỰ PHÒNG') || status.includes('DP') || h.sttMau === 'DP';
+        if (isReserve) return false;
+      }
+
       return true;
     });
   }, [
@@ -2302,6 +2290,7 @@ export default function App() {
     selectedSurveyorFilter, 
     selectedStatusFilter, 
     selectedSectorFilter, 
+    showReserveHouseholds,
     currentUser
   ]);
 
@@ -3085,8 +3074,10 @@ export default function App() {
     handleResetFilters();
     setCurrentSurveyorId(user.id);
     setIsLoggedIn(true);
-    localStorage.setItem('is_user_authenticated', 'true');
-    localStorage.setItem('active_surveyor_id', user.id);
+    try {
+      localStorage.setItem('is_user_authenticated', 'true');
+      localStorage.setItem('active_surveyor_id', user.id);
+    } catch (e) {}
     setLoginIdentifier('');
     setLoginPassword('');
     setShowLoginModal(false);
@@ -3106,7 +3097,7 @@ export default function App() {
   const handleLogout = () => {
     handleResetFilters();
     setIsLoggedIn(false);
-    localStorage.setItem('is_user_authenticated', 'false');
+    try { localStorage.setItem('is_user_authenticated', 'false'); } catch (e) {}
     showNotification('success', 'Đã đăng xuất khỏi tài khoản.');
   };
 
@@ -3716,7 +3707,7 @@ export default function App() {
             </span>
             <span className="font-bold flex items-center gap-1 text-teal-900">
               <BarChart3 className="w-3.5 h-3.5 text-teal-700" />
-              <span>Tổng hợp (Phạm vi đang lọc):</span>
+              <span>Tổng hợp:</span>
             </span>
             <span>Tổng số: <strong className="text-slate-900 font-bold">{totalItems} hộ</strong></span>
             <span className="text-slate-300">|</span>
@@ -3724,7 +3715,7 @@ export default function App() {
             <span className="text-slate-300">|</span>
             <span>Tổng nhân khẩu: <strong className="text-slate-900 font-bold">{surveyedMembers} người</strong></span>
             <span className="text-slate-300">|</span>
-            <span>Tổng thu nhập: <strong className="text-teal-900 font-bold">{surveyedIncome.toLocaleString()} (1.000 đ)</strong></span>
+            <span>Tổng thu nhập: <strong className="text-teal-900 font-bold">{surveyedIncome.toLocaleString()} (1000đ)</strong></span>
           </div>
 
           <div className="flex items-center gap-2">
@@ -3746,7 +3737,7 @@ export default function App() {
                       checked={isAllSelected} 
                       onChange={handleToggleSelectAll}
                       className="rounded text-teal-600 w-4 h-4 cursor-pointer"
-                      title="Chọn tất cả các dòng trên trang này"
+                      title="Tích tất cả các hộ trên trang này"
                     />
                   </th>
                 )}
@@ -3756,7 +3747,7 @@ export default function App() {
                 <th className="border border-[#047484] px-2.5 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0">Mã Xã</th>
                 <th className="border border-[#047484] px-3 py-2.5 bg-[#058da0] text-white font-semibold text-left sticky top-0">Tên Xã</th>
                 <th className="border border-[#047484] px-3 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0">Mã ĐB</th>
-                <th className="border border-[#047484] px-4 py-2.5 bg-[#058da0] text-white font-semibold text-left sticky top-0">Tên Địa bàn (Sheet)</th>
+                <th className="border border-[#047484] px-4 py-2.5 bg-[#058da0] text-white font-semibold text-left sticky top-0">Tên Địa bàn</th>
                 <th className="border border-[#047484] px-2.5 py-2.5 bg-[#058da0] text-white font-semibold text-left sticky top-0">Người nhập / ĐTV</th>
                 <th className="border border-[#047484] px-2.5 py-2.5 bg-[#058da0] text-white font-semibold text-center sticky top-0">Trạng thái phiếu</th>
                 <th className="border border-[#047484] px-2 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0">Mẫu</th>
@@ -3764,10 +3755,9 @@ export default function App() {
                 <th className="border border-[#047484] px-3 py-2.5 text-left bg-[#058da0] text-white font-semibold sticky top-0">Họ và tên chủ hộ</th>
                 <th className="border border-[#047484] px-3 py-2.5 text-left bg-[#058da0] text-white font-semibold sticky top-0">Địa chỉ của hộ</th>
                 <th className="border border-[#047484] px-2 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0">Nhân khẩu</th>
-                <th className="border border-[#047484] px-2 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0">Nguồn thu (1-4)</th>
+                <th className="border border-[#047484] px-1 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0 w-12 max-w-[50px] text-center" title="Nguồn thu">Nguồn thu</th>
                 <th className="border border-[#047484] px-3 py-2.5 text-left bg-[#058da0] text-white font-semibold sticky top-0">Phân loại ngành</th>
-                <th className="border border-[#047484] px-2.5 py-2.5 text-left bg-[#058da0] text-white font-semibold sticky top-0">Ghi chú (SĐT)</th>
-                <th className="border border-[#047484] px-3 py-2.5 text-right bg-[#058da0] text-white font-semibold sticky top-0">Tổng TN (1.000 đ)</th>
+                <th className="border border-[#047484] px-3 py-2.5 text-right bg-[#058da0] text-white font-semibold sticky top-0">Tổng TN (1000đ)</th>
                 {showEntryButton && <th className="border border-[#047484] px-3 py-2.5 bg-[#058da0] text-white font-semibold sticky top-0">Thao tác</th>}
               </tr>
             </thead>
@@ -3809,6 +3799,7 @@ export default function App() {
                           checked={isRowSelected} 
                           onChange={() => handleToggleSelectRow(h.id)}
                           className="rounded text-sky-600 w-4 h-4 cursor-pointer"
+                          title={`Tích chọn hộ: ${h.householdHead}`}
                         />
                       </td>
                     )}
@@ -3834,16 +3825,16 @@ export default function App() {
                       {SURVEY_STATUS_LABELS[status]?.label || 'Chưa nhập tin'}
                     </td>
 
-                    {/* Sample Status Column - Plain Text */}
-                    <td className="border border-slate-300 p-2 text-center text-slate-800 font-medium">
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                    {/* Sample Status Column - Bỏ đi khung bao quanh chữ */}
+                    <td className="border border-slate-300 p-2 text-center">
+                      <span className={`font-semibold text-xs ${
                         (h.sampleStatus || '').toUpperCase().includes('DỰ PHÒNG') || (h.sampleStatus || '').toUpperCase().includes('DP')
-                          ? 'bg-purple-100 text-purple-900 border border-purple-300'
+                          ? 'text-purple-700'
                           : (h.sampleStatus || '').toUpperCase().includes('ĐÃ THAY')
-                          ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                          ? 'text-amber-700'
                           : (h.sampleStatus || '').toUpperCase().includes('THAY')
-                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                          : 'bg-sky-100 text-sky-900 border border-sky-300'
+                          ? 'text-emerald-700'
+                          : 'text-slate-800'
                       }`}>
                         {h.sampleStatus || 'Chính thức'}
                       </span>
@@ -3852,75 +3843,87 @@ export default function App() {
                     <td className="border border-slate-300 p-2 font-semibold text-slate-900">{h.householdHead}</td>
                     <td className="border border-slate-300 p-2 text-slate-600">{h.address}</td>
                     <td className="border border-slate-300 p-2 text-center text-slate-800 font-medium">{h.membersCount}</td>
-                    <td className="border border-slate-300 p-2 text-center text-slate-800 font-medium">{h.sectorCode}</td>
+                    <td className="border border-slate-300 px-1 py-2 text-center font-bold text-slate-800 w-12 max-w-[50px]">{h.sectorCode}</td>
                     <td className="border border-slate-300 p-2 text-slate-800">{h.sectorName}</td>
-                    <td className="border border-slate-300 p-2 text-slate-600">{h.note}</td>
                     <td className="border border-slate-300 p-2 text-right font-bold text-slate-900">{inc.total.toLocaleString()}</td>
                     {showEntryButton && (
                       <td className="border border-slate-300 p-2 text-center">
-                        <div className="flex items-center justify-center gap-1">
+                        <div className="flex items-center justify-center gap-1.5">
+                          {/* Nút Nhập tin phiếu: biểu tượng kèm tooltip hover */}
                           <button 
                             onClick={() => setActiveHouseholdForm(h)}
-                            className={`px-2.5 py-1 text-white rounded font-bold flex items-center justify-center gap-1 cursor-pointer shadow-xs transition-colors ${
+                            className={`p-1.5 text-white rounded font-bold flex items-center justify-center cursor-pointer shadow-2xs hover:scale-105 transition-all ${
                               isLocked 
                                 ? 'bg-slate-700 hover:bg-slate-600' 
                                 : status === 'DA_HOAN_THANH'
                                 ? 'bg-emerald-700 hover:bg-emerald-600'
                                 : 'bg-sky-700 hover:bg-sky-600'
                             }`}
-                            title={isLocked ? 'Phiếu đã duyệt - Chế độ xem' : 'Mở phiếu nhập tin Phụ lục II'}
+                            title={isLocked ? 'Xem phiếu' : 'Nhập tin phiếu'}
+                            aria-label={isLocked ? 'Xem phiếu' : 'Nhập tin phiếu'}
                           >
                             {isLocked ? <Eye className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
-                            <span>{isLocked ? 'Xem phiếu' : 'Nhập tin phiếu'}</span>
                           </button>
 
+                          {/* Nút Thay hộ mẫu: biểu tượng kèm tooltip hover */}
                           <button
                             type="button"
                             onClick={() => setHouseholdToReplace(h)}
-                            className={`px-2 py-1 text-white rounded font-bold flex items-center justify-center gap-1 cursor-pointer shadow-xs transition-colors text-xs ${
+                            className={`p-1.5 text-white rounded font-bold flex items-center justify-center cursor-pointer shadow-2xs hover:scale-105 transition-all ${
                               (h.sampleStatus || '').toUpperCase().includes('ĐÃ THAY')
                                 ? 'bg-slate-600 hover:bg-slate-500'
                                 : 'bg-amber-600 hover:bg-amber-500 active:bg-amber-700'
                             }`}
                             title={
                               (h.sampleStatus || '').toUpperCase().includes('ĐÃ THAY')
-                                ? 'Hộ mẫu này đã được thay thế (bấm để xem lại hoặc đổi)'
-                                : 'Thay thế hộ mẫu bằng hộ dự phòng của cùng địa bàn này'
+                                ? 'Thay hộ mẫu (Đã thay thế)'
+                                : 'Thay hộ mẫu'
                             }
+                            aria-label="Thay hộ mẫu"
                           >
                             <RefreshCw className="w-3.5 h-3.5" />
-                            <span>{(h.sampleStatus || '').toUpperCase().includes('ĐÃ THAY') ? 'Đã thay' : 'Thay hộ mẫu'}</span>
                           </button>
 
-                          {currentUser?.role === 'ADMIN' && (
+                          {/* Duyệt & Khóa phiếu: biểu tượng kèm tooltip hover */}
+                          {(currentUser?.role === 'ADMIN' || currentUser?.role === 'SUPERVISOR') && (
                             <button
                               type="button"
                               onClick={async () => {
                                 const nextStatus: SurveyStatus = status === 'DA_DUYET' ? 'DA_HOAN_THANH' : 'DA_DUYET';
                                 const updatedH: Household = { ...h, surveyStatus: nextStatus };
-                                setHouseholds(prev => prev.map(item => item.id === h.id ? updatedH : item));
-                                await setDoc(doc(db, 'households', h.id), updatedH);
+                                setHouseholds(prev => {
+                                  const next = prev.map(item => item.id === h.id ? updatedH : item);
+                                  try { localStorage.setItem('cached_households', JSON.stringify(next)); } catch (e) {}
+                                  return next;
+                                });
+                                await safeFirestoreWrite(async () => {
+                                  await setDoc(doc(db, 'households', h.id), updatedH);
+                                });
                                 showNotification('success', `Đã ${nextStatus === 'DA_DUYET' ? 'Duyệt & Khóa' : 'Mở khóa'} phiếu hộ ${h.householdHead}`);
                               }}
-                              className={`p-1 rounded border cursor-pointer ${
+                              className={`p-1.5 rounded border cursor-pointer hover:scale-105 transition-all ${
                                 status === 'DA_DUYET' 
-                                  ? 'bg-purple-50 text-purple-700 border-purple-300 hover:bg-purple-100' 
-                                  : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-slate-100'
+                                  ? 'bg-purple-100 text-purple-800 border-purple-300 hover:bg-purple-200' 
+                                  : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
                               }`}
-                              title={status === 'DA_DUYET' ? 'Bấm để Mở khóa phiếu này' : 'Bấm để Duyệt & Khóa phiếu này'}
+                              title={status === 'DA_DUYET' ? 'Đã duyệt - Bấm để Mở khóa' : 'Duyệt phiếu hộ này'}
+                              aria-label={status === 'DA_DUYET' ? 'Mở khóa' : 'Duyệt'}
                             >
                               {status === 'DA_DUYET' ? <Lock className="w-3.5 h-3.5 text-purple-800" /> : <Unlock className="w-3.5 h-3.5" />}
                             </button>
                           )}
 
-                          <button
-                            type="button"
-                            onClick={() => setHouseholdToDelete(h)}
-                            className="p-1 text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 rounded border border-rose-200 cursor-pointer transition-colors"
-                            title={`Xóa hộ "${h.householdHead}"`}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {currentUser?.role === 'ADMIN' && (
+                            <button
+                              type="button"
+                              onClick={() => setHouseholdToDelete(h)}
+                              className="p-1.5 text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 rounded border border-rose-200 cursor-pointer transition-colors hover:scale-105"
+                              title={`Xóa hộ "${h.householdHead}"`}
+                              aria-label="Xóa hộ"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     )}
@@ -3929,7 +3932,7 @@ export default function App() {
               })}
               {paginatedHouseholds.length === 0 && (
                 <tr>
-                  <td colSpan={showEntryButton ? 20 : 19} className="text-center py-10 text-slate-500">
+                  <td colSpan={showEntryButton ? 19 : 18} className="text-center py-10 text-slate-500">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <AlertCircle className="w-8 h-8 text-amber-500" />
                       <span className="font-bold text-slate-700">Không tìm thấy hộ gia đình nào theo tiêu chí lọc hiện tại.</span>
@@ -4363,7 +4366,7 @@ export default function App() {
               }`}
             >
               <TrendingUp className={`w-4 h-4 ${activeTab === 'macro_control' ? 'text-teal-800' : 'text-amber-300'}`} />
-              <span className={activeTab === 'macro_control' ? 'text-teal-950 font-black' : 'text-white'}>4. Kiểm soát TNBQ (Admin)</span>
+              <span className={activeTab === 'macro_control' ? 'text-teal-950 font-black' : 'text-white'}>4. Kiểm soát TNBQ</span>
             </button>
           )}
 
@@ -4482,89 +4485,130 @@ export default function App() {
               </select>
             </div>
 
-            {/* 3. Địa bàn điều tra */}
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold text-slate-700">Địa bàn:</span>
-              <select 
-                value={selectedAreaId} 
-                onChange={e => {
-                  setSelectedAreaId(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
-              >
-                <option value="ALL">Tất cả</option>
-                {availableFilterAreas.map(a => (
-                  <option key={a.id} value={a.id}>
-                    ĐB {a.code} - {a.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* 4. Ngành (1-4) */}
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold text-slate-700">Ngành:</span>
-              <select 
-                value={selectedSectorFilter} 
-                onChange={e => {
-                  setSelectedSectorFilter(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
-              >
-                <option value="ALL">Tất cả</option>
-                <option value="1">1. Nông, lâm thủy sản</option>
-                <option value="2">2. Công nghiệp xây dựng</option>
-                <option value="3">3. Thương mại dịch vụ</option>
-                <option value="4">4. Nguồn thu khác / Lương</option>
-              </select>
-            </div>
-
-            {/* 5. Tìm kiếm */}
-            <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded px-2.5 h-8 shadow-2xs">
-              <Search className="w-3.5 h-3.5 text-slate-400" />
-              <input 
-                type="text" 
-                placeholder="Tìm chủ hộ, xã, ĐB..." 
-                value={searchKeyword}
-                onChange={e => {
-                  setSearchKeyword(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="bg-transparent border-none text-xs focus:outline-none w-36 font-medium text-slate-800"
-              />
-              {searchKeyword && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearchKeyword('');
+            {/* 3. Địa bàn điều tra (Ẩn ở trang Tải bảng kê để giao diện gọn gàng) */}
+            {activeTab !== 'import' && (
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-slate-700">Địa bàn:</span>
+                <select 
+                  value={selectedAreaId} 
+                  onChange={e => {
+                    setSelectedAreaId(e.target.value);
                     setCurrentPage(1);
                   }}
-                  className="text-slate-400 hover:text-slate-600 font-bold px-1"
+                  className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
                 >
-                  ✕
-                </button>
-              )}
-            </div>
+                  <option value="ALL">Tất cả</option>
+                  {availableFilterAreas.map(a => (
+                    <option key={a.id} value={a.id}>
+                      ĐB {a.code} - {a.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* 4. Ngành (1-4) (Ẩn ở trang Tải bảng kê) */}
+            {activeTab !== 'import' && (
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-slate-700">Ngành:</span>
+                <select 
+                  value={selectedSectorFilter} 
+                  onChange={e => {
+                    setSelectedSectorFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="h-8 w-36 bg-white border border-slate-300 rounded px-2 text-slate-800 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs"
+                >
+                  <option value="ALL">Tất cả</option>
+                  <option value="1">1. Nông, lâm thủy sản</option>
+                  <option value="2">2. Công nghiệp xây dựng</option>
+                  <option value="3">3. Thương mại dịch vụ</option>
+                  <option value="4">4. Nguồn thu khác / Lương</option>
+                </select>
+              </div>
+            )}
+
+            {/* 5. Tìm kiếm (Ẩn ở trang Tải bảng kê theo yêu cầu) */}
+            {activeTab !== 'import' && (
+              <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded px-2.5 h-8 shadow-2xs">
+                <Search className="w-3.5 h-3.5 text-slate-400" />
+                <input 
+                  type="text" 
+                  placeholder="Tìm chủ hộ, xã, ĐB..." 
+                  value={searchKeyword}
+                  onChange={e => {
+                    setSearchKeyword(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className="bg-transparent border-none text-xs focus:outline-none w-36 font-medium text-slate-800"
+                />
+                {searchKeyword && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchKeyword('');
+                      setCurrentPage(1);
+                    }}
+                    className="text-slate-400 hover:text-slate-600 font-bold px-1"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Nút Tải bảng kê nhanh trực tiếp ngay trên thanh lọc khi ở Tab Tải bảng kê */}
+            {activeTab === 'import' && (
+              (() => {
+                const curCom = communes.find(c => c.id === selectedCommuneId || (Boolean(c.communeCode) && selectedCommuneId === c.communeCode));
+                if (!curCom) {
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => showNotification('error', 'Vui lòng chọn Xã cụ thể trong danh sách hoặc bộ lọc để tải bảng kê.')}
+                      className="h-8 px-3.5 bg-sky-700 hover:bg-sky-600 text-white rounded font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                      title="Chọn xã ở ô chọn phía trước rồi bấm tải bảng kê"
+                    >
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Tải bảng kê</span>
+                    </button>
+                  );
+                }
+                const hasData = households.some(h => h.communeId === curCom.id || (Boolean(curCom.communeCode) && (h as any).communeCode === curCom.communeCode));
+                return (
+                  <label className="h-8 px-3.5 bg-sky-700 hover:bg-sky-600 text-white rounded font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-xs transition-all active:scale-95">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{hasData ? `Tải lại bảng kê [${curCom.communeCode}]` : `Tải bảng kê [${curCom.communeCode}]`}</span>
+                    <input 
+                      type="file" 
+                      accept=".xlsx, .xls" 
+                      onChange={(e) => handleUploadForCommune(curCom, e)} 
+                      className="hidden" 
+                    />
+                  </label>
+                );
+              })()
+            )}
 
             {(selectedTkcs !== 'ALL' || selectedCommuneId !== 'ALL' || selectedAreaId !== 'ALL' || selectedSectorFilter !== 'ALL' || selectedSurveyorFilter !== 'ALL' || selectedStatusFilter !== 'ALL' || searchKeyword.trim() !== '' || onlyMyHouseholds) && (
               <button
                 type="button"
                 onClick={handleResetFilters}
                 className="h-8 px-2.5 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded font-bold text-xs flex items-center gap-1 cursor-pointer shadow-xs transition-colors"
-                title="Xóa toàn bộ bộ lọc để xem toàn bộ danh sách hộ đã nạp"
+                title="Xóa toàn bộ bộ lọc để xem toàn bộ danh sách"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
-                <span>Bỏ lọc (Hiện tất cả {households.length} hộ)</span>
+                <span>Bỏ lọc</span>
               </button>
             )}
           </div>
 
           <div className="flex items-center gap-2.5 flex-wrap">
-            <span className="text-slate-600 font-medium text-xs hidden lg:inline mr-1">
-              Hiển thị: <strong className="text-sky-800 font-bold">{filteredHouseholds.length}</strong> / {households.length} hộ
-            </span>
+            {activeTab !== 'import' && (
+              <span className="text-slate-600 font-medium text-xs hidden lg:inline mr-1">
+                Hiển thị: <strong className="text-sky-800 font-bold">{filteredHouseholds.length}</strong> / {households.length} hộ
+              </span>
+            )}
 
             <button 
               onClick={handleExportEnteredQuestionnairesExcel} 
@@ -4615,177 +4659,140 @@ export default function App() {
         {/* TAB 1: IMPORT FILE EXCEL & CONFIG */}
         {activeTab === 'import' && (
           <div className="flex flex-col gap-3 w-full">
-            {/* PHẦN TRÊN: BẢNG LƯỚI 6 CỘT DANH MỤC XÃ (Gọn 7-8 dòng, có thanh cuộn) */}
-            <div className="bg-white rounded border border-slate-300 shadow-xs overflow-hidden flex flex-col">
-              <div className="bg-[#058da0] text-white px-3.5 py-2.5 border-b border-[#047484] flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Building2 className="w-4 h-4 text-cyan-200" />
-                  <span className="font-extrabold text-white text-xs uppercase tracking-wide">
-                    1. Danh mục Xã & Tải danh sách Bảng kê Hộ mẫu ({filteredCommunesForImport.length} xã)
-                  </span>
+            {/* KHỐI QUY TRÌNH HƯỚNG DẪN & THAO TÁC TẢI BẢNG KÊ TRỰC TIẾP */}
+            {(() => {
+              const currentCommune = communes.find(c => c.id === selectedCommuneId || (Boolean(c.communeCode) && selectedCommuneId === c.communeCode));
+              const currentCommuneHhs = currentCommune ? households.filter(h => h.communeId === currentCommune.id || (Boolean(currentCommune.communeCode) && (h as any).communeCode === currentCommune.communeCode)) : [];
+              const currentCommuneAreas = currentCommune ? areas.filter(a => a.communeId === currentCommune.id || (Boolean(currentCommune.communeCode) && (a as any).communeCode === currentCommune.communeCode)) : [];
+              const hasLoadedData = currentCommuneHhs.length > 0;
+
+              return (
+                <div className="bg-gradient-to-r from-sky-50 via-teal-50 to-white border border-sky-300 rounded-lg p-3.5 shadow-2xs flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-[#058da0] text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+                      <Upload className="w-5 h-5 text-cyan-100" />
+                    </div>
+                    <div>
+                      <div className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                        {currentCommune ? (
+                          <>
+                            <span className="text-[#047484]">Xã đang chọn: [{currentCommune.communeCode}] {currentCommune.communeName}</span>
+                            <span className="text-slate-500 font-medium text-xs">({currentCommune.tkcsName || currentCommune.tkcsCode})</span>
+                          </>
+                        ) : selectedTkcs !== 'ALL' ? (
+                          <>
+                            <span>Đang lọc TKCS: [{selectedTkcs}]</span>
+                            <span className="text-amber-700 font-semibold text-xs ml-1">• Chọn Xã ở thanh lọc phía trên để bấm Tải bảng kê</span>
+                          </>
+                        ) : (
+                          <span>Quy trình: 1. Chọn TKCS ➔ 2. Chọn Xã ➔ 3. Bấm "Tải bảng kê"</span>
+                        )}
+                      </div>
+                      <div className="text-slate-600 text-xs mt-0.5">
+                        {currentCommune ? (
+                          hasLoadedData ? (
+                            <span className="text-emerald-700 font-semibold">
+                              ✓ Trạng thái: Đã tải lên <strong className="font-bold">{currentCommuneHhs.length} hộ</strong> ({currentCommuneAreas.length} địa bàn). Bảng phía dưới đang hiển thị danh sách để bạn quan sát.
+                            </span>
+                          ) : (
+                            <span className="text-amber-800 font-medium">
+                              ℹ Trạng thái: Xã này chưa nạp bảng kê. Bấm nút <strong>"Tải bảng kê [{currentCommune.communeCode}]"</strong> để chọn file Excel (.xlsx).
+                            </span>
+                          )
+                        ) : (
+                          <span>
+                            Đã ẩn danh mục 104 xã để màn hình rộng rãi. Hãy chọn Xã ở thanh lọc phía trên rồi bấm nút Tải bảng kê; bảng phía dưới giữ lại danh sách hộ đã tải để bạn tiện quan sát.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {currentCommune ? (
+                      <>
+                        <label className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#058da0] hover:bg-[#047484] text-white rounded text-xs font-bold cursor-pointer transition-all shadow-xs hover:scale-102 active:scale-95">
+                          <Upload className="w-4 h-4" />
+                          <span>{hasLoadedData ? `Tải lại bảng kê [${currentCommune.communeCode}]` : `Tải bảng kê [${currentCommune.communeCode}]`}</span>
+                          <input 
+                            type="file" 
+                            accept=".xlsx, .xls" 
+                            onChange={(e) => handleUploadForCommune(currentCommune, e)} 
+                            className="hidden" 
+                          />
+                        </label>
+
+                        {hasLoadedData && (
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('entry')}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-xs font-bold cursor-pointer transition-all shadow-xs active:scale-95"
+                            title="Chuyển sang trang nhập tin phiếu hộ để bắt đầu nhập liệu"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>Vào Nhập tin hộ</span>
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedCommuneId('ALL');
+                            setCurrentPage(1);
+                          }}
+                          className="px-2.5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-xs font-semibold cursor-pointer transition-colors"
+                          title="Bỏ chọn xã hiện tại để xem tất cả hộ đã tải lên"
+                        >
+                          Xem tất cả hộ
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => showNotification('error', 'Vui lòng chọn một Xã cụ thể từ ô Xã ở thanh lọc phía trên để tải bảng kê.')}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-200 text-slate-600 rounded text-xs font-bold cursor-pointer hover:bg-slate-300 transition-colors"
+                      >
+                        <Upload className="w-4 h-4 text-slate-500" />
+                        <span>Tải bảng kê</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-[11px] text-cyan-100 font-medium italic hidden sm:inline">
-                    Đã nạp: {communes.filter(c => households.some(h => h.communeId === c.id || (Boolean(c.communeCode) && (h as any).communeCode === c.communeCode))).length}/{communes.length} xã • Bấm dòng xã để xem danh sách hộ
-                  </span>
+              );
+            })()}
+
+            {/* BẢNG DANH SÁCH HỘ ĐÃ TẢI LÊN ĐỂ QUAN SÁT (Giữ lại danh sách hộ để quan sát theo đúng yêu cầu) */}
+            <div className="bg-white rounded border border-slate-300 shadow-sm p-3.5 flex flex-col gap-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2.5">
+                <div>
+                  <h3 className="font-extrabold text-slate-800 text-xs uppercase flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-[#058da0]" />
+                    <span>Danh sách hộ điều tra đã tải lên: {filteredHouseholds.length} / {households.length} hộ</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {selectedCommuneId !== 'ALL' 
+                      ? `Đang quan sát danh sách hộ của xã đã chọn. Để nhập tin phiếu chi tiết, bạn chuyển sang tab "2. Nhập tin hộ".`
+                      : `Tổng cộng ${households.length} hộ đã được tải lên hệ thống. Chọn Xã ở trên để lọc riêng từng xã.`}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 self-start sm:self-auto">
                   {households.length > 0 && (
                     <button 
                       onClick={() => setIsClearAllModalOpen(true)}
-                      className="px-2 py-0.5 bg-rose-700 hover:bg-rose-600 text-white rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer shadow-2xs transition-colors"
+                      className="px-2.5 py-1 bg-rose-700 hover:bg-rose-600 text-white rounded text-xs font-semibold flex items-center gap-1 cursor-pointer shadow-2xs transition-colors"
                       title="Xóa toàn bộ dữ liệu hộ điều tra đã nạp"
                     >
-                      <Trash2 className="w-3 h-3" />
+                      <Trash2 className="w-3.5 h-3.5" />
                       <span>Xóa dữ liệu hộ</span>
                     </button>
                   )}
                 </div>
               </div>
 
-              <div className="overflow-x-auto overflow-y-auto max-h-[290px]">
-                <table className="w-full text-xs text-left border-collapse">
-                  <thead className="sticky top-0 z-10 bg-[#058da0] shadow-2xs">
-                    <tr className="bg-[#058da0] text-white font-bold border-b border-[#047484] select-none uppercase text-[11px] tracking-wider">
-                      <th className="py-2.5 px-3 text-center border-r border-[#047484] w-12">STT</th>
-                      <th className="py-2.5 px-3.5 border-r border-[#047484] min-w-[170px]">Tên TKCS</th>
-                      <th className="py-2.5 px-2.5 text-center border-r border-[#047484] w-24">Mã TKCS</th>
-                      <th className="py-2.5 px-3.5 border-r border-[#047484] min-w-[190px]">Tên Xã, Phường</th>
-                      <th className="py-2.5 px-2.5 text-center border-r border-[#047484] w-28">Mã Xã</th>
-                      <th className="py-2.5 px-3 text-center min-w-[200px]">Tải bảng kê</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200 font-medium">
-                    {filteredCommunesForImport.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="py-8 text-center text-slate-500 font-medium">
-                          Không tìm thấy đơn vị xã phù hợp với điều kiện tìm kiếm.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredCommunesForImport.map((c, idx) => {
-                        const communeHouseholds = households.filter(h => h.communeId === c.id || (Boolean(c.communeCode) && (h as any).communeCode === c.communeCode));
-                        const hhCount = communeHouseholds.length;
-                        const communeAreas = areas.filter(a => a.communeId === c.id || (Boolean(c.communeCode) && (a as any).communeCode === c.communeCode));
-                        const areaCount = communeAreas.length;
-                        const isLoaded = hhCount > 0;
-                        const isSelected = selectedCommuneId !== 'ALL' && (selectedCommuneId === c.id || (Boolean(c.communeCode) && selectedCommuneId === c.communeCode));
-
-                        return (
-                          <tr 
-                            key={c.id || c.communeCode} 
-                            onClick={() => {
-                              if (selectedCommuneId === c.id || (Boolean(c.communeCode) && selectedCommuneId === c.communeCode)) {
-                                // Click lại dòng đang chọn -> Bỏ chọn để xem toàn bộ tất cả hộ
-                                setSelectedCommuneId('ALL');
-                                setSelectedTkcs('ALL');
-                                setSelectedAreaId('ALL');
-                              } else {
-                                setSelectedCommuneId(c.id);
-                                setSelectedTkcs(c.tkcsCode || 'ALL');
-                                setSelectedAreaId('ALL');
-                              }
-                              setCurrentPage(1);
-                            }}
-                            className={`transition-colors cursor-pointer hover:bg-[#e6f6f8] ${
-                              isSelected 
-                                ? 'bg-sky-100 font-semibold border-l-4 border-l-sky-800' 
-                                : idx % 2 === 1 ? 'bg-[#f2fafb]' : 'bg-white'
-                            }`}
-                          >
-                            <td className="py-2 px-3 text-center text-slate-500 font-bold border-r border-slate-200">
-                              {idx + 1}
-                            </td>
-                            <td className="py-2 px-3.5 font-bold text-slate-900 border-r border-slate-200">
-                              {c.tkcsName || c.tkcsCode}
-                            </td>
-                            <td className="py-2 px-2.5 text-center font-mono text-slate-700 border-r border-slate-200">
-                              {c.tkcsCode}
-                            </td>
-                            <td className="py-2 px-3.5 font-bold text-slate-900 border-r border-slate-200">
-                              {c.communeName}
-                            </td>
-                            <td className="py-2 px-2.5 text-center font-mono text-slate-700 border-r border-slate-200">
-                              {c.communeCode}
-                            </td>
-                            <td className="py-1.5 px-3 text-center" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex items-center justify-center gap-2 flex-wrap">
-                                {isLoaded ? (
-                                  <>
-                                    <span className="text-slate-800 font-medium text-xs">
-                                      {hhCount} hộ ({areaCount} ĐB)
-                                    </span>
-
-                                    <label className="inline-flex items-center gap-1 px-2.5 py-1 bg-sky-700 hover:bg-sky-600 text-white rounded text-xs font-bold cursor-pointer transition-all shadow-2xs active:scale-95">
-                                      <Upload className="w-3 h-3" />
-                                      <span>Tải lại</span>
-                                      <input 
-                                        type="file" 
-                                        accept=".xlsx, .xls" 
-                                        onChange={(e) => handleUploadForCommune(c, e)} 
-                                        className="hidden" 
-                                      />
-                                    </label>
-                                  </>
-                                ) : (
-                                  <label className="inline-flex items-center gap-1.5 px-3 py-1 bg-sky-700 hover:bg-sky-600 text-white rounded text-xs font-bold cursor-pointer transition-all shadow-xs hover:scale-105 active:scale-95">
-                                    <Upload className="w-3.5 h-3.5" />
-                                    <span>Tải bảng kê</span>
-                                    <input 
-                                      type="file" 
-                                      accept=".xlsx, .xls" 
-                                      onChange={(e) => handleUploadForCommune(c, e)} 
-                                      className="hidden" 
-                                    />
-                                  </label>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
+              {/* Hiển thị bảng hộ để người dùng quan sát */}
+              {renderHouseholdTable(false, "max-h-[620px]")}
             </div>
-
-            {/* BẢNG KÊ DANH SÁCH HỘ ĐIỀU TRA */}
-            <div className="flex flex-col gap-2">
-              <div className="bg-sky-50 border border-sky-300 rounded px-3.5 py-2 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="font-extrabold text-sky-950 flex items-center gap-1.5">
-                    <FileText className="w-4 h-4 text-sky-700" />
-                    <span>
-                      {selectedCommuneId === 'ALL'
-                        ? `Danh sách Bảng kê Hộ mẫu: Hiển thị toàn bộ ${filteredHouseholds.length} / ${households.length} hộ (Tất cả 104 xã, không lọc)`
-                        : `Danh sách Bảng kê Hộ mẫu: Đang lọc theo Xã [${communes.find(c => c.id === selectedCommuneId)?.communeCode || selectedCommuneId}] ${communes.find(c => c.id === selectedCommuneId)?.communeName || ''} (${filteredHouseholds.length} hộ)`}
-                    </span>
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {selectedCommuneId !== 'ALL' ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedCommuneId('ALL');
-                        setSelectedTkcs('ALL');
-                        setSelectedAreaId('ALL');
-                        setCurrentPage(1);
-                      }}
-                      className="px-2.5 py-1 bg-sky-800 hover:bg-sky-700 active:bg-sky-900 text-white rounded font-bold cursor-pointer transition-all shadow-2xs flex items-center gap-1"
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                      <span>Xem toàn bộ {households.length} hộ (Bỏ lọc xã)</span>
-                    </button>
-                  ) : (
-                    <span className="text-slate-500 font-medium italic">
-                      💡 Bấm vào dòng xã ở bảng trên để lọc theo từng xã, hoặc bấm lại để xem tất cả
-                    </span>
-                  )}
-                </div>
-              </div>
-              {renderHouseholdTable(true, 'max-h-[350px]')}
-            </div>
-
           </div>
         )}
 
@@ -4796,7 +4803,7 @@ export default function App() {
               <div>
                 <h2 className="font-bold text-slate-800 text-sm uppercase flex items-center gap-2">
                   <FileText className="w-4 h-4 text-sky-800" />
-                  <span>Danh sách Bảng kê Hộ mẫu & Nhập tin chi tiết Phụ lục II ({filteredHouseholds.length} / {households.length} hộ)</span>
+                  <span>Danh sách Bảng kê Hộ mẫu & Nhập tin: {filteredHouseholds.length} / {households.length} hộ</span>
                 </h2>
                 <p className="text-xs text-slate-600 mt-0.5">
                   Phân công điều tra viên, theo dõi tiến độ nhập, bấm "Thay hộ mẫu" để thay thế hộ dự phòng cùng địa bàn hoặc "Nhập tin phiếu" tại từng hộ.
@@ -4811,7 +4818,7 @@ export default function App() {
                   title="Bỏ toàn bộ các tiêu chí lọc để hiển thị danh sách đầy đủ toàn bộ hộ"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Hiện tất cả {households.length} hộ (Bỏ lọc)</span>
+                  <span>Hiện tất cả {households.length} hộ</span>
                 </button>
               )}
             </div>
@@ -4882,12 +4889,37 @@ export default function App() {
                     <option value="4">4. Nguồn thu khác / Lương</option>
                   </select>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowReserveHouseholds(!showReserveHouseholds)}
+                  className={`h-8 px-2.5 rounded font-bold cursor-pointer transition-all flex items-center gap-1 border text-xs ${
+                    showReserveHouseholds 
+                      ? 'bg-purple-800 text-white border-purple-900 shadow-2xs' 
+                      : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+                  }`}
+                  title="Mặc định ẩn hộ dự phòng. Bấm để hiển thị cả hộ dự phòng"
+                >
+                  <span>{showReserveHouseholds ? 'Hiện hộ dự phòng' : 'Ẩn hộ dự phòng'}</span>
+                </button>
               </div>
 
               <div className="flex items-center gap-2">
                 <span className="text-slate-500 font-medium">
                   Đã chọn: <strong className="text-sky-900">{selectedHouseholdIds.length}</strong> hộ
                 </span>
+
+                {(currentUser?.role === 'ADMIN' || currentUser?.role === 'SUPERVISOR') && (
+                  <button
+                    type="button"
+                    onClick={() => setIsDuyetDiaBanModalOpen(true)}
+                    className="h-8 px-3 bg-purple-700 hover:bg-purple-600 active:bg-purple-800 text-white rounded font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                    title="Duyệt địa bàn: Tích tất cả hoặc tích chọn từng hộ để duyệt và khóa"
+                  >
+                    <CheckSquare className="w-4 h-4" />
+                    <span>Duyệt địa bàn</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -4925,7 +4957,7 @@ export default function App() {
                     </button>
                   </div>
 
-                  {currentUser?.role === 'ADMIN' && (
+                  {(currentUser?.role === 'ADMIN' || currentUser?.role === 'SUPERVISOR') && (
                     <>
                       <button
                         type="button"
@@ -4934,7 +4966,7 @@ export default function App() {
                         title="Duyệt và khóa không cho sửa"
                       >
                         <Lock className="w-3.5 h-3.5" />
-                        <span>Duyệt & Khóa</span>
+                        <span>Duyệt & Khóa {selectedHouseholdIds.length} hộ</span>
                       </button>
 
                       <button
@@ -4944,7 +4976,7 @@ export default function App() {
                         title="Mở khóa để cho phép sửa"
                       >
                         <Unlock className="w-3.5 h-3.5" />
-                        <span>Mở khóa</span>
+                        <span>Mở khóa {selectedHouseholdIds.length} hộ</span>
                       </button>
                     </>
                   )}
@@ -4982,7 +5014,7 @@ export default function App() {
               <div>
                 <h2 className="font-bold text-slate-800 text-sm flex items-center gap-2 uppercase tracking-wide">
                   <BarChart3 className="w-5 h-5 text-sky-800" />
-                  <span>TỔNG HỢP NHANH SỐ LIỆU ĐIỀU TRA THU NHẬP (PHỤ LỤC II)</span>
+                  <span>TỔNG HỢP NHANH SỐ LIỆU ĐIỀU TRA THU NHẬP</span>
                 </h2>
                 <p className="text-xs text-slate-600 mt-0.5">
                   Dữ liệu tự động liên kết theo Bộ lọc dùng chung hoặc khi bấm chọn trực tiếp vào TKCS / Xã ở Bảng 1 bên dưới.
@@ -5060,7 +5092,7 @@ export default function App() {
                       <div className="bg-white/10 rounded p-2.5 border border-white/10">
                         <span className="text-sky-200 block text-[11px]">Nhân khẩu đã nhập tin:</span>
                         <strong className="text-lg font-black text-sky-200">{totalMembers} người</strong>
-                        <span className="block text-[10px] text-sky-300 mt-0.5">Thu nhập tích lũy: {totalIncome.toLocaleString()} (kđ)</span>
+                        <span className="block text-[10px] text-sky-300 mt-0.5">Thu nhập tích lũy: {totalIncome.toLocaleString()} (1000đ)</span>
                       </div>
                       <div className="bg-white/10 rounded p-2.5 border border-white/10">
                         <label className="text-amber-200 block text-[11px] font-bold mb-1">Ghi chú của giám sát viên:</label>
@@ -5133,7 +5165,7 @@ export default function App() {
                       <div className="bg-white/10 rounded p-2.5 border border-white/10">
                         <span className="text-sky-200 block text-[11px]">Tổng nhân khẩu điều tra:</span>
                         <strong className="text-lg font-black text-sky-200">{totalMembers} người</strong>
-                        <span className="block text-[10px] text-sky-300 mt-0.5">Tổng TN: {totalIncome.toLocaleString()} (1.000 đ)</span>
+                        <span className="block text-[10px] text-sky-300 mt-0.5">Tổng TN: {totalIncome.toLocaleString()} (1000đ)</span>
                       </div>
                       <div className="bg-white/10 rounded p-2.5 border border-white/10">
                         <span className="text-amber-200 block text-[11px]">TNBQ bình quân tháng:</span>
@@ -5168,7 +5200,7 @@ export default function App() {
                           <th className="p-2 text-center border border-slate-300 w-16">Còn lại</th>
                           <th className="p-2 text-center border border-slate-300 min-w-[130px]">Tiến độ</th>
                           <th className="p-2 text-center border border-slate-300">Nhân khẩu</th>
-                          <th className="p-2 text-right border border-slate-300">Tổng TN (1.000 đ)</th>
+                          <th className="p-2 text-right border border-slate-300">Tổng TN (1000đ)</th>
                           <th className="p-2 text-right border border-slate-300">TNBQ/tháng</th>
                           <th className="p-2 text-center border border-slate-300">Thao tác</th>
                         </tr>
@@ -5278,31 +5310,31 @@ export default function App() {
                     <tr className="bg-[#058da0] text-white font-bold text-[11px] uppercase tracking-wider">
                       <th rowSpan={2} className="border border-[#047484] px-2 py-2 w-10 text-center">STT</th>
                       <th rowSpan={2} className="border border-[#047484] px-3 py-2 text-left min-w-[150px] bg-[#046c7c] text-amber-200">
-                        Tên TKCS (Bấm chọn)
+                        Tên TKCS
                       </th>
                       <th rowSpan={2} className="border border-[#047484] px-2 py-2 w-16 text-center bg-[#046c7c] text-amber-200">
                         Mã TKCS
                       </th>
                       <th rowSpan={2} className="border border-[#047484] px-3 py-2 text-left min-w-[160px] bg-[#047a8c] text-cyan-100">
-                        Tên Xã, Phường (Bấm chọn)
+                        Tên Xã, Phường
                       </th>
                       <th rowSpan={2} className="border border-[#047484] px-2 py-2 w-16 text-center bg-[#047a8c] text-cyan-100">
                         Mã Xã
                       </th>
                       
-                      {/* Group: Bảng kê trong xã (Hộ) */}
+                      {/* Group: Bảng kê trong xã */}
                       <th colSpan={5} className="border border-[#047484] py-1 bg-[#047484] text-amber-200">
-                        Bảng kê trong xã (Hộ)
+                        Bảng kê trong xã
                       </th>
                       
-                      {/* Group: Tỷ trọng (%) */}
+                      {/* Group: Tỷ trọng */}
                       <th colSpan={4} className="border border-[#047484] py-1 bg-[#046c7c] text-cyan-100">
-                        Tỷ trọng cơ cấu (%)
+                        Tỷ trọng cơ cấu %
                       </th>
                       
                       {/* Group: Mẫu chính thức */}
                       <th colSpan={5} className="border border-[#047484] py-1 bg-[#047484] text-emerald-200">
-                        Mẫu chính thức (Phân bổ)
+                        Mẫu chính thức
                       </th>
                       
                       {/* Mẫu dự phòng */}
@@ -5538,7 +5570,7 @@ export default function App() {
                   </div>
                   <div>
                     <h3 className="font-extrabold text-sm md:text-base uppercase tracking-wide flex items-center gap-2">
-                      <span>Bảng Tổng Hợp Nhanh Thu Nhập Bình Quân Đầu Người (Phụ lục II)</span>
+                      <span>Bảng Tổng Hợp Nhanh Thu Nhập Bình Quân Đầu Người</span>
                     </h3>
                     <p className="text-xs text-amber-300 font-bold mt-0.5 flex items-center gap-1.5">
                       <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -5547,13 +5579,13 @@ export default function App() {
                           (() => {
                             const a = areas.find(item => item.id === selectedAreaId || item.code === selectedAreaId);
                             const c = communes.find(item => item.id === a?.communeId || item.communeCode === (a as any)?.communeCode);
-                            return `📍 Đang liên kết ĐỊA BÀN: [${a?.code || selectedAreaId}] ${a?.name || 'Địa bàn'} (Thuộc Xã: [${c?.communeCode || '---'}] ${c?.communeName || ''} - Đã điều tra ${tnhSummary.totalSurveyedHH} hộ, ${tnhSummary.totalMembers} nhân khẩu)`;
+                            return `📍 Đang liên kết ĐỊA BÀN: [${a?.code || selectedAreaId}] ${a?.name || 'Địa bàn'} - Xã [${c?.communeCode || '---'}] ${c?.communeName || ''} - Đã điều tra ${tnhSummary.totalSurveyedHH} hộ, ${tnhSummary.totalMembers} nhân khẩu`;
                           })()
                         ) : tnhScopeMode === 'COMMUNE_SECTOR' || tnhScopeMode === 'COMMUNE_QUICK' ? (
                           tnhSelectedCommuneId !== 'ALL' ? (
                             (() => {
                               const c = communes.find(item => item.id === tnhSelectedCommuneId || item.communeCode === tnhSelectedCommuneId);
-                              return `📍 Đang liên kết đơn vị XÃ: [${c?.communeCode || '---'}] ${c?.communeName || '---'} (Thuộc TKCS: [${c?.tkcsCode || '---'}] ${c?.tkcsName || ''})`;
+                              return `📍 Đang liên kết đơn vị XÃ: [${c?.communeCode || '---'}] ${c?.communeName || '---'} - TKCS [${c?.tkcsCode || '---'}] ${c?.tkcsName || ''}`;
                             })()
                           ) : (
                             '📍 Đang liên kết: Toàn bộ 104 Xã / Phường'
@@ -5564,13 +5596,13 @@ export default function App() {
                               const matchingCommunes = communes.filter(c => c.tkcsCode === tnhSelectedTkcs);
                               const tkName = matchingCommunes[0]?.tkcsName || 'Thống kê cơ sở';
                               const cNames = matchingCommunes.map(c => c.communeName).join(', ');
-                              return `📍 Đang liên kết THỐNG KÊ CƠ SỞ: [${tnhSelectedTkcs}] ${tkName} (Gồm ${matchingCommunes.length} xã: ${cNames})`;
+                              return `📍 Đang liên kết THỐNG KÊ CƠ SỞ: [${tnhSelectedTkcs}] ${tkName} - Gồm ${matchingCommunes.length} xã: ${cNames}`;
                             })()
                           ) : (
                             '📍 Đang liên kết: Toàn bộ Thống kê cơ sở'
                           )
                         ) : (
-                          '📍 Đang liên kết: Toàn Tỉnh (104 Xã / Phường)'
+                          '📍 Đang liên kết: Toàn Tỉnh'
                         )}
                       </span>
                     </p>
@@ -5579,7 +5611,7 @@ export default function App() {
 
                 <div className="flex items-center gap-2">
                   <span className="bg-black/20 px-3 py-1.5 rounded border border-white/20 text-xs font-bold text-white">
-                    Phạm vi: <strong className="text-amber-300">{tnhScopeCommunes.length} xã</strong> | Mẫu: <strong className="text-emerald-300">{tnhSummary.totalAllocMau} hộ</strong> | Đã điều tra: <strong className="text-amber-300">{tnhSummary.totalSurveyedHH} hộ ({tnhSummary.totalMembers} ng)</strong>
+                    Phạm vi: <strong className="text-amber-300">{tnhScopeCommunes.length} xã</strong> | Mẫu: <strong className="text-emerald-300">{tnhSummary.totalAllocMau} hộ</strong> | Đã điều tra: <strong className="text-amber-300">{tnhSummary.totalSurveyedHH} hộ - {tnhSummary.totalMembers} người</strong>
                   </span>
                 </div>
               </div>
@@ -5593,22 +5625,22 @@ export default function App() {
                       <th className="border border-[#047484] p-2.5 w-16 bg-[#058da0]">Mã loại</th>
                       <th className="border border-[#047484] p-2.5 text-left min-w-[200px] bg-[#058da0]">Tên nhóm ngành nguồn thu lớn nhất</th>
                       <th className="border border-[#047484] p-2.5 w-32 bg-[#047484] text-amber-200">
-                        Tổng số hộ trong bảng kê (Cột D)
+                        Tổng số hộ trong bảng kê
                       </th>
                       <th className="border border-[#047484] p-2.5 w-28 bg-[#047484] text-cyan-100">
-                        Tỷ trọng cơ cấu (%) (Cột E)
+                        Tỷ trọng cơ cấu %
                       </th>
                       <th className="border border-[#047484] p-2.5 w-32 bg-[#047484] text-emerald-200">
-                        Chỉ tiêu phân bổ mẫu chính thức (Cột F)
+                        Chỉ tiêu phân bổ mẫu chính thức
                       </th>
                       <th className="border border-[#047484] p-2.5 w-28 bg-[#058da0] text-white">
                         Hộ điều tra thực tế
                       </th>
                       <th className="border border-[#047484] p-2.5 w-40 bg-[#035b69] text-emerald-100">
-                        TNBQ đầu người/tháng theo loại hộ (Cột K = G/F/12) (1.000 đ)
+                        TNBQ đầu người/tháng theo loại hộ (1.000 đ)
                       </th>
                       <th className="border border-[#047484] p-2.5 w-44 bg-[#02444e] text-amber-300 font-black">
-                        Suy rộng TNBQ (= Tỷ trọng cơ cấu * TNBQ theo loại hộ) (1.000 đ)
+                        Suy rộng TNBQ (1.000 đ)
                       </th>
                     </tr>
                   </thead>
@@ -5697,7 +5729,7 @@ export default function App() {
               </p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-0.5">
                 <div className="bg-white p-2.5 rounded border border-amber-200">
-                  <span className="font-bold text-amber-900 block mb-0.5">1. TNBQ đầu người/tháng theo loại hộ (Cột K):</span>
+                  <span className="font-bold text-amber-900 block mb-0.5">1. TNBQ đầu người/tháng theo loại hộ:</span>
                   <code className="text-[11px] font-bold text-emerald-900 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 block">
                     = Tổng thu nhập nhóm / Tổng số nhân khẩu đã điều tra / 12
                   </code>
@@ -5721,9 +5753,9 @@ export default function App() {
             {tnhScopeMode !== 'COMMUNE_QUICK' ? (
               <div className="flex flex-col gap-6 mt-2">
                 {[
-                  { code: 1, label: 'I. Hộ NLTS (Nông, lâm thủy sản)' },
-                  { code: 2, label: 'II. Hộ CNXD (Công nghiệp xây dựng)' },
-                  { code: 3, label: 'III. Hộ TMDV (Thương mại dịch vụ)' },
+                  { code: 1, label: 'I. Hộ NLTS' },
+                  { code: 2, label: 'II. Hộ CNXD' },
+                  { code: 3, label: 'III. Hộ TMDV' },
                   { code: 4, label: 'IV. Hộ Nguồn thu khác / Lương' }
                 ].map(grp => {
                   const sData = tnhSummary.sectorData.find(s => s.code === grp.code);
@@ -5742,7 +5774,7 @@ export default function App() {
                           <span>Tổng thu nhập: <strong className="text-emerald-950 font-black">{sData.groupIncome.toLocaleString()} Nghìn đồng</strong></span>
                           <span>|</span>
                           <span className="bg-white px-2.5 py-1 rounded border border-amber-500 font-extrabold text-emerald-950 shadow-2xs">
-                            TNBQ đầu người/tháng theo loại hộ (=G/F/12): {sData.perCapitaMonth.toLocaleString()} Nghìn đồng
+                            TNBQ đầu người/tháng theo loại hộ: {sData.perCapitaMonth.toLocaleString()} Nghìn đồng
                           </span>
                         </div>
                       </div>
@@ -5756,8 +5788,8 @@ export default function App() {
                               <th className="border border-slate-300 p-2 text-left">Địa bàn điều tra</th>
                               <th className="border border-slate-300 p-2 w-20">STT Mẫu</th>
                               <th className="border border-slate-300 p-2 text-left">Họ và tên chủ hộ</th>
-                              <th className="border border-slate-300 p-2 w-32 text-center bg-rose-50 text-rose-900 font-bold">Tổng số thành viên của hộ (Người)</th>
-                              <th className="border border-slate-300 p-2 w-40 text-right bg-amber-50 text-amber-900 font-bold">Tổng thu nhập (1.000đ)</th>
+                              <th className="border border-slate-300 p-2 w-32 text-center bg-rose-50 text-rose-900 font-bold">Tổng số thành viên của hộ</th>
+                              <th className="border border-slate-300 p-2 w-40 text-right bg-amber-50 text-amber-900 font-bold">Tổng thu nhập (1000đ)</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -5839,7 +5871,7 @@ export default function App() {
                   title="Tải file Excel lên với cấu hình tiêu đề dòng và cột"
                 >
                   <Upload className="w-4 h-4" />
-                  <span>Tải file lên (Cấu hình dòng & cột)</span>
+                  <span>Tải file lên</span>
                 </button>
 
                 <button
@@ -6031,7 +6063,7 @@ export default function App() {
                     <thead className="sticky top-0 z-10 bg-[#058da0]">
                       <tr className="bg-[#058da0] text-white text-center font-bold">
                         <th className="border border-[#047484] p-2 w-16">Mã ĐB</th>
-                        <th className="border border-[#047484] p-2 text-left">Tên địa bàn (Sheet)</th>
+                        <th className="border border-[#047484] p-2 text-left">Tên địa bàn</th>
                         <th className="border border-[#047484] p-2 w-20">Số hộ</th>
                         <th className="border border-[#047484] p-2 text-center w-24">Thao tác</th>
                       </tr>
@@ -6285,7 +6317,7 @@ export default function App() {
             onSelectActiveUser={(s) => {
               handleResetFilters();
               setCurrentSurveyorId(s.id);
-              localStorage.setItem('active_surveyor_id', s.id);
+              try { localStorage.setItem('active_surveyor_id', s.id); } catch (e) {}
               showNotification('success', `Đang thao tác với vai trò: ${s.name} (${ROLE_LABELS[s.role]?.label || s.role})`);
             }}
             showNotification={showNotification}
@@ -6784,6 +6816,151 @@ export default function App() {
           isOpen={isGlobalCatalogOpen}
           onClose={() => setIsGlobalCatalogOpen(false)}
         />
+      )}
+
+      {/* MODAL DUYỆT ĐỊA BÀN: HỖ TRỢ TÍCH TẤT CẢ VÀ TÍCH CHỌN HỘ */}
+      {isDuyetDiaBanModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-lg border border-slate-300 shadow-2xl max-w-lg w-full overflow-hidden text-xs">
+            <div className="bg-purple-800 text-white p-3.5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CheckSquare className="w-5 h-5 text-purple-200" />
+                <h3 className="font-bold text-sm uppercase">Duyệt Địa bàn Điều tra</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDuyetDiaBanModalOpen(false)}
+                className="text-white hover:bg-purple-900 p-1 rounded cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 flex flex-col gap-3 text-slate-700">
+              <div className="bg-purple-50 border border-purple-200 rounded p-3 text-purple-950 font-medium">
+                <p className="font-bold text-purple-900 mb-1">Chức năng Duyệt địa bàn:</p>
+                <p className="text-slate-700">
+                  Bạn có thể <strong>Tích tất cả các hộ</strong> trong địa bàn đang lọc ({filteredHouseholds.length} hộ) hoặc <strong>Tích chọn từng hộ</strong> trên danh sách để thực hiện Duyệt & Khóa phiếu.
+                </p>
+                <div className="mt-2 pt-2 border-t border-purple-200 flex items-center justify-between text-xs">
+                  <span>Phạm vi hiển thị: <strong>{filteredHouseholds.length} hộ</strong></span>
+                  <span>Đã tích chọn: <strong className="text-purple-800 font-bold">{selectedHouseholdIds.length} hộ</strong></span>
+                </div>
+              </div>
+
+              {/* Chức năng tích tất cả và bỏ tích */}
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const allIds = filteredHouseholds.map(h => h.id);
+                    setSelectedHouseholdIds(allIds);
+                    showNotification('success', `Đã tích chọn tất cả ${allIds.length} hộ trong danh sách.`);
+                  }}
+                  className="flex-1 py-2 bg-sky-700 hover:bg-sky-600 active:bg-sky-800 text-white rounded font-bold flex items-center justify-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                >
+                  <CheckSquare className="w-4 h-4" />
+                  <span>Tích tất cả ({filteredHouseholds.length} hộ)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedHouseholdIds([]);
+                    showNotification('success', 'Đã bỏ tích chọn tất cả các hộ.');
+                  }}
+                  className="px-3.5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded font-semibold cursor-pointer"
+                >
+                  Bỏ chọn
+                </button>
+              </div>
+
+              {/* Thao tác Duyệt */}
+              <div className="flex flex-col gap-2 pt-2 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const count = filteredHouseholds.length;
+                    if (count === 0) {
+                      showNotification('error', 'Không có hộ nào trong danh sách để duyệt.');
+                      return;
+                    }
+                    const targetIds = new Set(filteredHouseholds.map(h => h.id));
+                    const updatedHouseholds = households.map(h => {
+                      if (targetIds.has(h.id)) {
+                        return { ...h, surveyStatus: 'DA_DUYET' as SurveyStatus };
+                      }
+                      return h;
+                    });
+                    setHouseholds(updatedHouseholds);
+                    try { localStorage.setItem('cached_households', JSON.stringify(updatedHouseholds)); } catch (e) {}
+                    setSelectedHouseholdIds([]);
+                    setIsDuyetDiaBanModalOpen(false);
+                    showNotification('success', `Đã Duyệt & Khóa thành công toàn bộ ${count} hộ của địa bàn!`);
+
+                    setTimeout(async () => {
+                      try {
+                        const chunked = updatedHouseholds.filter(h => targetIds.has(h.id));
+                        for (let i = 0; i < chunked.length; i += 300) {
+                          const batch = writeBatch(db);
+                          chunked.slice(i, i + 300).forEach(h => {
+                            batch.update(doc(db, 'households', h.id), { surveyStatus: 'DA_DUYET' });
+                          });
+                          await batch.commit();
+                        }
+                      } catch (e) {
+                        console.warn("Batch approve error", e);
+                      }
+                    }, 50);
+                  }}
+                  className="w-full py-2.5 bg-purple-700 hover:bg-purple-600 active:bg-purple-800 text-white rounded font-extrabold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition-colors"
+                >
+                  <Lock className="w-4 h-4" />
+                  <span>Duyệt & Khóa toàn bộ địa bàn ({filteredHouseholds.length} hộ)</span>
+                </button>
+
+                {selectedHouseholdIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await handleBatchSetStatus('DA_DUYET');
+                      setIsDuyetDiaBanModalOpen(false);
+                    }}
+                    className="w-full py-2 bg-indigo-700 hover:bg-indigo-600 text-white rounded font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                  >
+                    <CheckSquare className="w-4 h-4" />
+                    <span>Duyệt {selectedHouseholdIds.length} hộ đã tích chọn</span>
+                  </button>
+                )}
+
+                {selectedHouseholdIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await handleBatchSetStatus('DA_HOAN_THANH');
+                      setIsDuyetDiaBanModalOpen(false);
+                    }}
+                    className="w-full py-2 bg-slate-600 hover:bg-slate-500 text-white rounded font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                  >
+                    <Unlock className="w-4 h-4" />
+                    <span>Mở khóa {selectedHouseholdIds.length} hộ đã tích chọn</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-slate-200 text-slate-500 text-[11px]">
+                <span>Bạn cũng có thể tích chọn từng hộ trực tiếp trên bảng danh sách</span>
+                <button
+                  type="button"
+                  onClick={() => setIsDuyetDiaBanModalOpen(false)}
+                  className="px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded font-bold cursor-pointer"
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* MODAL 1: XÁC NHẬN XÓA TOÀN BỘ DỮ LIỆU ĐỂ UP LẠI */}
