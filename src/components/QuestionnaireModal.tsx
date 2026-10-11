@@ -6,22 +6,13 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Save, X, Plus, Trash2, BookOpen, Check, Calculator, ChevronRight, 
-  Printer, Lock, Unlock, ShieldAlert, CheckCircle2, UserCheck, AlertTriangle, RotateCcw,
-  FileSpreadsheet, Users, Briefcase, Award, CheckSquare, Layers, TrendingUp
+  Printer, Lock, Unlock, ShieldAlert, CheckCircle2, UserCheck, AlertTriangle, RotateCcw 
 } from 'lucide-react';
-import { 
-  FullQuestionnaire, ProductionRow, NonAgriRow, SalaryRow,
-  QuestionnaireType, QUESTIONNAIRE_TYPES,
-  LaborMemberRow, LaborQuestionnaire, MultidimensionalPovertyQuestionnaire, QuickIncomeQuestionnaire,
-  createDefaultLaborQuestionnaire, createDefaultPovertyQuestionnaire, createDefaultQuickIncomeQuestionnaire
-} from '../types/questionnaire';
+import { FullQuestionnaire, ProductionRow, NonAgriRow, SalaryRow } from '../types/questionnaire';
 import { calculateFullIncome, calcProductionRowIncome, calcNonAgriRowIncome } from '../utils/incomeCalculator';
 import CatalogModal, { CatalogSectionType } from './CatalogModal';
 import { CatalogItem } from '../constants/catalogs';
 import { Surveyor, SurveyStatus, SURVEY_STATUS_LABELS } from '../types/user';
-import { LaborQuestionnaireView } from './questionnaires/LaborQuestionnaireView';
-import { PovertyQuestionnaireView } from './questionnaires/PovertyQuestionnaireView';
-import { QuickIncomeQuestionnaireView } from './questionnaires/QuickIncomeQuestionnaireView';
 
 interface QuestionnaireModalProps {
   household: any;
@@ -48,22 +39,6 @@ export default function QuestionnaireModal({
     membersCount: isUserManuallyEntered && household?.membersCount && Number(household.membersCount) > 0 ? household.membersCount : '',
     workingMembersCount: isUserManuallyEntered && household?.workingMembersCount !== undefined && household?.workingMembersCount !== null && household?.workingMembersCount !== '' ? household.workingMembersCount : ''
   }));
-  const [selectedQuestionnaireType, setSelectedQuestionnaireType] = useState<QuestionnaireType>(() => {
-    return (household as any)?.questionnaireType || 'PHIEU_01_THU_NHAP';
-  });
-
-  const [laborForm, setLaborForm] = useState<LaborQuestionnaire>(() => {
-    return (household as any)?.laborQuestionnaire || createDefaultLaborQuestionnaire(household?.householdHead, Number(household?.membersCount) || 1);
-  });
-
-  const [povertyForm, setPovertyForm] = useState<MultidimensionalPovertyQuestionnaire>(() => {
-    return (household as any)?.povertyQuestionnaire || createDefaultPovertyQuestionnaire();
-  });
-
-  const [quickIncomeForm, setQuickIncomeForm] = useState<QuickIncomeQuestionnaire>(() => {
-    return (household as any)?.quickIncomeQuestionnaire || createDefaultQuickIncomeQuestionnaire();
-  });
-
   const [validationWarning, setValidationWarning] = useState<string | null>(null);
   const [validationAlertModal, setValidationAlertModal] = useState<{
     isOpen: boolean;
@@ -81,10 +56,6 @@ export default function QuestionnaireModal({
         membersCount: isManual && household.membersCount && Number(household.membersCount) > 0 ? household.membersCount : '',
         workingMembersCount: isManual && household.workingMembersCount !== undefined && household.workingMembersCount !== null && household.workingMembersCount !== '' ? household.workingMembersCount : ''
       });
-      setSelectedQuestionnaireType((household as any)?.questionnaireType || 'PHIEU_01_THU_NHAP');
-      setLaborForm((household as any)?.laborQuestionnaire || createDefaultLaborQuestionnaire(household?.householdHead, Number(household?.membersCount) || 1));
-      setPovertyForm((household as any)?.povertyQuestionnaire || createDefaultPovertyQuestionnaire());
-      setQuickIncomeForm((household as any)?.quickIncomeQuestionnaire || createDefaultQuickIncomeQuestionnaire());
       setValidationWarning(null);
       setValidationAlertModal(null);
     }
@@ -199,21 +170,10 @@ export default function QuestionnaireModal({
       assignedSurveyorName: assignedSurveyor ? assignedSurveyor.name : form.assignedSurveyorName,
       updatedBy: currentUser?.name || 'Hệ thống',
       updatedAt: new Date().toISOString(),
-      questionnaireType: selectedQuestionnaireType,
       questionnaire: {
         ...q,
         surveyorName: q.surveyorName || form.assignedSurveyorName || currentUser?.name || ''
-      },
-      laborQuestionnaire: {
-        ...laborForm,
-        surveyorName: laborForm.surveyorName || form.assignedSurveyorName || currentUser?.name || '',
-        workingAgeCount: laborForm.members.length,
-        employedCount: laborForm.members.filter(m => m.employmentStatus === 'Có việc làm').length,
-        insuredCount: laborForm.members.filter(m => m.hasSocialInsurance).length,
-        trainedCount: laborForm.members.filter(m => m.technicalQualification && m.technicalQualification !== 'Chưa qua đào tạo').length
-      },
-      povertyQuestionnaire: povertyForm,
-      quickIncomeQuestionnaire: quickIncomeForm
+      }
     };
     onSave(payload);
   };
@@ -566,37 +526,6 @@ export default function QuestionnaireModal({
           </div>
         </div>
 
-        {/* BỘ CHỌN LOẠI PHIẾU ĐIỀU TRA (HỖ TRỢ MỞ RỘNG NHẬP TIN ĐA DẠNG LOẠI PHIẾU) */}
-        <div className="bg-sky-950 text-white px-4 py-2 flex flex-wrap items-center justify-between gap-2 border-b border-sky-900 shadow-inner">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wide flex items-center gap-1.5 shrink-0">
-              <FileSpreadsheet className="w-4 h-4 text-amber-300" />
-              Chọn Loại Phiếu:
-            </span>
-            <div className="flex items-center bg-sky-900/90 p-0.5 rounded-lg border border-sky-700/80 gap-1 flex-wrap">
-              {QUESTIONNAIRE_TYPES.map(qt => (
-                <button
-                  key={qt.id}
-                  type="button"
-                  onClick={() => setSelectedQuestionnaireType(qt.id)}
-                  className={`px-3 py-1 rounded font-bold transition-all text-xs flex items-center gap-1.5 cursor-pointer ${
-                    selectedQuestionnaireType === qt.id
-                      ? 'bg-amber-400 text-slate-950 shadow-xs'
-                      : 'text-sky-200 hover:text-white hover:bg-sky-800'
-                  }`}
-                  title={qt.description}
-                >
-                  <span className="text-[10px] font-black opacity-80">[{qt.code}]</span>
-                  <span>{qt.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="text-[11px] text-sky-200 hidden md:block italic">
-            💡 {QUESTIONNAIRE_TYPES.find(qt => qt.id === selectedQuestionnaireType)?.description}
-          </div>
-        </div>
-
         {/* Lock Warning Banner */}
         {isLocked && (
           <div className="bg-amber-500 text-white px-4 py-2 flex items-center justify-between text-xs font-bold shadow-xs">
@@ -746,100 +675,63 @@ export default function QuestionnaireModal({
           </div>
         </div>
 
-        {/* Section Navigation Tabs (Chỉ hiển thị cho Phiếu 01: Thu nhập 7 mục) */}
-        {selectedQuestionnaireType === 'PHIEU_01_THU_NHAP' && (
-          <div className="bg-slate-100 border-b border-slate-300 px-3 flex items-center gap-1 overflow-x-auto font-bold text-[11px]">
-            <button 
-              onClick={() => setActiveTab('muc1')} 
-              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc1' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
-            >
-              Mục 1: Lương, công ({income.muc1.toLocaleString()} đ)
-            </button>
-            <button 
-              onClick={() => setActiveTab('muc2')} 
-              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc2' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
-            >
-              Mục 2: Trồng trọt ({income.muc2.toLocaleString()} đ)
-            </button>
-            <button 
-              onClick={() => setActiveTab('muc3')} 
-              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc3' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
-            >
-              Mục 3: Chăn nuôi ({income.muc3.toLocaleString()} đ)
-            </button>
-            <button 
-              onClick={() => setActiveTab('muc4')} 
-              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc4' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
-            >
-              Mục 4: Lâm nghiệp ({income.muc4.toLocaleString()} đ)
-            </button>
-            <button 
-              onClick={() => setActiveTab('muc5')} 
-              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc5' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
-            >
-              Mục 5: Thủy sản ({income.muc5.toLocaleString()} đ)
-            </button>
-            <button 
-              onClick={() => setActiveTab('muc6')} 
-              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc6' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
-            >
-              Mục 6: Phi nông ({income.muc6.toLocaleString()} đ)
-            </button>
-            <button 
-              onClick={() => setActiveTab('muc7')} 
-              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc7' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
-            >
-              Mục 7: Thu khác ({income.muc7.toLocaleString()} đ)
-            </button>
-            <button 
-              onClick={() => setActiveTab('tonghop')} 
-              className={`py-2 px-3 border-b-2 cursor-pointer transition-colors bg-emerald-50 text-emerald-900 border-emerald-600 font-extrabold`}
-            >
-              ★ Biểu tổng hợp hộ: {income.total.toLocaleString()} đ
-            </button>
-          </div>
-        )}
+        {/* Section Navigation Tabs */}
+        <div className="bg-slate-100 border-b border-slate-300 px-3 flex items-center gap-1 overflow-x-auto font-bold text-[11px]">
+          <button 
+            onClick={() => setActiveTab('muc1')} 
+            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc1' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
+          >
+            Mục 1: Lương, công ({income.muc1.toLocaleString()} đ)
+          </button>
+          <button 
+            onClick={() => setActiveTab('muc2')} 
+            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc2' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
+          >
+            Mục 2: Trồng trọt ({income.muc2.toLocaleString()} đ)
+          </button>
+          <button 
+            onClick={() => setActiveTab('muc3')} 
+            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc3' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
+          >
+            Mục 3: Chăn nuôi ({income.muc3.toLocaleString()} đ)
+          </button>
+          <button 
+            onClick={() => setActiveTab('muc4')} 
+            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc4' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
+          >
+            Mục 4: Lâm nghiệp ({income.muc4.toLocaleString()} đ)
+          </button>
+          <button 
+            onClick={() => setActiveTab('muc5')} 
+            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc5' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
+          >
+            Mục 5: Thủy sản ({income.muc5.toLocaleString()} đ)
+          </button>
+          <button 
+            onClick={() => setActiveTab('muc6')} 
+            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc6' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
+          >
+            Mục 6: Phi nông ({income.muc6.toLocaleString()} đ)
+          </button>
+          <button 
+            onClick={() => setActiveTab('muc7')} 
+            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors ${activeTab === 'muc7' ? 'border-sky-700 text-sky-800 bg-white' : 'border-transparent text-slate-600 hover:bg-slate-200'}`}
+          >
+            Mục 7: Thu khác ({income.muc7.toLocaleString()} đ)
+          </button>
+          <button 
+            onClick={() => setActiveTab('tonghop')} 
+            className={`py-2 px-3 border-b-2 cursor-pointer transition-colors bg-emerald-50 text-emerald-900 border-emerald-600 font-extrabold`}
+          >
+            ★ Biểu tổng hợp hộ: {income.total.toLocaleString()} đ
+          </button>
+        </div>
 
         {/* Tab Body */}
         <div className="p-4 overflow-y-auto flex-1 flex flex-col gap-4 bg-slate-50">
 
-          {/* HIỂN THỊ PHIẾU 02: LAO ĐỘNG & VIỆC LÀM */}
-          {selectedQuestionnaireType === 'PHIEU_02_LAO_DONG' && (
-            <LaborQuestionnaireView
-              laborForm={laborForm}
-              setLaborForm={setLaborForm}
-              membersCount={form.membersCount}
-              workingMembersCount={form.workingMembersCount}
-              householdHead={form.householdHead}
-              isLocked={isLocked}
-            />
-          )}
-
-          {/* HIỂN THỊ PHIẾU 03: RÀ SOÁT HỘ NGHÈO ĐA CHIỀU */}
-          {selectedQuestionnaireType === 'PHIEU_03_HO_NGHEO' && (
-            <PovertyQuestionnaireView
-              povertyForm={povertyForm}
-              setPovertyForm={setPovertyForm}
-              membersCount={form.membersCount}
-              isLocked={isLocked}
-            />
-          )}
-
-          {/* HIỂN THỊ PHIẾU 04: THU NHẬP RÚT GỌN */}
-          {selectedQuestionnaireType === 'PHIEU_04_RUT_GON' && (
-            <QuickIncomeQuestionnaireView
-              quickIncomeForm={quickIncomeForm}
-              setQuickIncomeForm={setQuickIncomeForm}
-              membersCount={form.membersCount}
-              isLocked={isLocked}
-            />
-          )}
-
-          {/* HIỂN THỊ PHIẾU 01: THU NHẬP 7 MỤC CHI TIẾT */}
-          {selectedQuestionnaireType === 'PHIEU_01_THU_NHAP' && (
-            <>
-              {/* MỤC 1: LƯƠNG, TIỀN CÔNG (Trang 1) */}
-              {activeTab === 'muc1' && (
+          {/* MỤC 1: LƯƠNG, TIỀN CÔNG (Trang 1) */}
+          {activeTab === 'muc1' && (
             <div className="flex flex-col gap-3">
               <div className="bg-white p-3 rounded border border-slate-300 flex items-center justify-between">
                 <div>
@@ -1526,56 +1418,17 @@ export default function QuestionnaireModal({
               </div>
             </div>
           )}
-          </>
-        )}
 
         </div>
 
         {/* Footer actions */}
         <div className="bg-slate-100 p-3 border-t border-slate-300 flex flex-col gap-2">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              {selectedQuestionnaireType === 'PHIEU_01_THU_NHAP' && (
-                <>
-                  <span className="font-bold text-slate-700">Tổng thu nhập hộ:</span>
-                  <span className="font-black text-emerald-800 text-sm bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
-                    {income.total.toLocaleString()} (1.000 đồng)
-                  </span>
-                </>
-              )}
-
-              {selectedQuestionnaireType === 'PHIEU_02_LAO_DONG' && (
-                <>
-                  <span className="font-bold text-slate-700">Tổng thu nhập từ việc làm:</span>
-                  <span className="font-black text-indigo-800 text-sm bg-indigo-100 px-2 py-0.5 rounded border border-indigo-300">
-                    {((laborForm.members || []).reduce((s, m) => s + (Number(m.monthlyIncomeEst) || 0) * 12, 0)).toLocaleString()} (1.000 đồng/năm)
-                  </span>
-                </>
-              )}
-
-              {selectedQuestionnaireType === 'PHIEU_03_HO_NGHEO' && (
-                <>
-                  <span className="font-bold text-slate-700">Kết luận chuẩn đa chiều:</span>
-                  <span className={`font-black text-xs px-2.5 py-1 rounded border shadow-2xs ${
-                    povertyForm.povertyClassification === 'Hộ nghèo'
-                      ? 'bg-rose-100 text-rose-900 border-rose-300'
-                      : povertyForm.povertyClassification === 'Hộ cận nghèo'
-                      ? 'bg-amber-100 text-amber-900 border-amber-300'
-                      : 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                  }`}>
-                    {povertyForm.povertyClassification} ({povertyForm.b1_totalScore} đ B1 • {povertyForm.b2_deprivationCount}/12 thiếu hụt)
-                  </span>
-                </>
-              )}
-
-              {selectedQuestionnaireType === 'PHIEU_04_RUT_GON' && (
-                <>
-                  <span className="font-bold text-slate-700">Tổng thu nhập ròng cả năm:</span>
-                  <span className="font-black text-emerald-800 text-sm bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
-                    {quickIncomeForm.totalNetIncome.toLocaleString()} (1.000 đồng)
-                  </span>
-                </>
-              )}
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-slate-700">Tổng thu nhập hộ:</span>
+              <span className="font-black text-emerald-800 text-sm bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300">
+                {income.total.toLocaleString()} (1.000 đồng)
+              </span>
             </div>
 
             <div className="flex items-center gap-2">

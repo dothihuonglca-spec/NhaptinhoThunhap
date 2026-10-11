@@ -69,6 +69,46 @@
         "name": { "type": "string", "description": "Sheet name as area name" }
       },
       "required": ["id", "code", "name"]
+    },
+    "Enterprise01": {
+      "title": "Enterprise01",
+      "description": "Enterprise survey 01/TGTSP-DNCN for industrial production",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique record ID" },
+        "taxCode": { "type": "string", "description": "Tax identification code" },
+        "enterpriseName": { "type": "string", "description": "Company name" },
+        "communeCode": { "type": "string", "description": "Commune code" },
+        "communeName": { "type": "string", "description": "Commune name" },
+        "surveyStatus": { "type": "string", "description": "Status" }
+      },
+      "required": ["id", "enterpriseName"]
+    },
+    "Establishment02": {
+      "title": "Establishment02",
+      "description": "Individual establishment survey 02/TGTSP-CTCN",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique record ID" },
+        "establishmentOrder": { "type": "string", "description": "Establishment order number" },
+        "establishmentName": { "type": "string", "description": "Establishment name" },
+        "communeCode": { "type": "string", "description": "Commune code" },
+        "communeName": { "type": "string", "description": "Commune name" },
+        "surveyStatus": { "type": "string", "description": "Status" }
+      },
+      "required": ["id", "establishmentName"]
+    },
+    "IndustrialSummary": {
+      "title": "IndustrialSummary",
+      "description": "Summary report 03/TH-CN and 04/TH-CN",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique summary ID" },
+        "communeCode": { "type": "string", "description": "Commune code" },
+        "communeName": { "type": "string", "description": "Commune name" },
+        "surveyYear": { "type": "string", "description": "Survey year" }
+      },
+      "required": ["id", "communeCode"]
     }
   },
   "firestore": {
@@ -87,6 +127,18 @@
     "/surveyAreas/{areaId}": {
       "schema": "SurveyArea",
       "description": "Survey areas corresponding to Excel sheets"
+    },
+    "/enterprises_01/{enterpriseId}": {
+      "schema": "Enterprise01",
+      "description": "Enterprises industrial survey form 01/TGTSP-DNCN"
+    },
+    "/establishments_02/{establishmentId}": {
+      "schema": "Establishment02",
+      "description": "Individual establishments industrial survey form 02/TGTSP-CTCN"
+    },
+    "/industrial_summaries/{summaryId}": {
+      "schema": "IndustrialSummary",
+      "description": "Industrial product summary reports forms 03 and 04"
     }
   }
 }

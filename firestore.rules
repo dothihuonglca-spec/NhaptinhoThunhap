@@ -13,5 +13,14 @@ service cloud.firestore {
     match /surveyors/{surveyorId} {
       allow read, write: if true;
     }
+    match /enterprises_01/{enterpriseId} {
+      allow read, write: if true;
+    }
+    match /establishments_02/{establishmentId} {
+      allow read, write: if true;
+    }
+    match /industrial_summaries/{summaryId} {
+      allow read, write: if true;
+    }
   }
 }

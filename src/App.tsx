@@ -11,15 +11,12 @@ import {
   AlertCircle, RefreshCw, Filter, Search, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight,
   Check, Cloud, FileText, Loader2, TableProperties, MapPin, Building2, Hash, BookOpen, Copy, 
   Shield, ShieldCheck, Lock, Unlock, Eye, EyeOff, CheckSquare, Square, UserCheck, ShieldAlert, AlertTriangle, X,
-  LogOut, LogIn, KeyRound, User, TrendingUp
+  LogOut, LogIn, KeyRound, User, TrendingUp, ExternalLink
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType, safeFirestoreWrite, isQuotaExceeded } from './firebase';
 import { collection, getDocs, addDoc, deleteDoc, doc, setDoc, query, onSnapshot, writeBatch } from 'firebase/firestore';
 
-import { 
-  FullQuestionnaire, createDefaultQuestionnaire, QuestionnaireType, QUESTIONNAIRE_TYPES,
-  LaborQuestionnaire, MultidimensionalPovertyQuestionnaire, QuickIncomeQuestionnaire 
-} from './types/questionnaire';
+import { FullQuestionnaire, createDefaultQuestionnaire } from './types/questionnaire';
 import { calculateFullIncome } from './utils/incomeCalculator';
 import QuestionnaireModal from './components/QuestionnaireModal';
 import CatalogModal from './components/CatalogModal';
@@ -27,6 +24,8 @@ import SurveyorManagement from './components/SurveyorManagement';
 import ExcelHeaderConfigModal from './components/ExcelHeaderConfigModal';
 import { IncomeMacroControl } from './components/IncomeMacroControl';
 import { ReplaceHouseholdModal } from './components/ReplaceHouseholdModal';
+import IndustrialSurveyModule from './components/IndustrialSurveyModule';
+import { IndustrialSurveyPage } from './modules/industrialSurvey';
 import bannerImg from './assets/images/background-ngoai-troi-dep_042633251.jpg';
 import { OFFICIAL_COMMUNES_CATALOG } from './data/communesCatalog';
 import { 
@@ -96,11 +95,7 @@ export interface Household {
   surveyStatus?: SurveyStatus;
   updatedBy?: string;
   updatedAt?: string;
-  questionnaireType?: QuestionnaireType;
   questionnaire?: FullQuestionnaire;
-  laborQuestionnaire?: LaborQuestionnaire;
-  povertyQuestionnaire?: MultidimensionalPovertyQuestionnaire;
-  quickIncomeQuestionnaire?: QuickIncomeQuestionnaire;
 }
 
 export interface SurveyArea {
@@ -155,7 +150,22 @@ const SECTOR_NAMES = {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'import' | 'entry' | 'tnh' | 'macro_control' | 'database' | 'catalog' | 'surveyors'>('import');
+  // Chế độ phân hệ phần mềm riêng biệt:
+  // 'industrial': Phần mềm Nhập tin & Tổng hợp Điều tra Công nghiệp (DN & Cá thể)
+  // 'household': Phần mềm Quản lý Nhập tin Phiếu thu nhập Hộ dân cư
+  const [appMode, setAppMode] = useState<'household' | 'industrial'>(() => {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlMode = urlParams.get('mode') || urlParams.get('app');
+      if (urlMode === 'industrial') return 'industrial';
+      if (urlMode === 'household') return 'household';
+      const saved = localStorage.getItem('preferred_app_mode');
+      if (saved === 'industrial' || saved === 'household') return saved;
+    } catch (e) {}
+    return 'industrial'; // Mặc định mở Trang chuyên dụng Điều tra Công nghiệp theo yêu cầu người dùng
+  });
+
+  const [activeTab, setActiveTab] = useState<'industrial_survey' | 'import' | 'entry' | 'tnh' | 'macro_control' | 'database' | 'catalog' | 'surveyors'>('import');
   
   const [communes, setCommunes] = useState<Commune[]>([]);
   const [areas, setAreas] = useState<SurveyArea[]>([]);
@@ -2296,14 +2306,6 @@ export default function App() {
   ]);
 
   const calculateHouseholdTotalIncome = (h: Household) => {
-    if (h.questionnaireType === 'PHIEU_04_RUT_GON' && h.quickIncomeQuestionnaire) {
-      const net = Number(h.quickIncomeQuestionnaire.totalNetIncome) || 0;
-      return { muc1: 0, muc2: 0, muc3: 0, muc4: 0, muc5: 0, muc6: 0, muc7: 0, total: net };
-    }
-    if (h.questionnaireType === 'PHIEU_02_LAO_DONG' && h.laborQuestionnaire) {
-      const totalLabor = (h.laborQuestionnaire.members || []).reduce((sum, m) => sum + ((Number(m.monthlyIncomeEst) || 0) * 12), 0);
-      return { muc1: totalLabor, muc2: 0, muc3: 0, muc4: 0, muc5: 0, muc6: 0, muc7: 0, total: totalLabor };
-    }
     return calculateFullIncome(h.questionnaire);
   };
 
@@ -2311,9 +2313,6 @@ export default function App() {
   const isHouseholdSurveyed = (h: Household): boolean => {
     if (!h) return false;
     if (h.surveyStatus === 'DA_HOAN_THANH' || h.surveyStatus === 'DA_DUYET' || h.surveyStatus === 'DANG_NHAP') return true;
-    if (h.laborQuestionnaire && (h.laborQuestionnaire.members || []).length > 0) return true;
-    if (h.povertyQuestionnaire && h.povertyQuestionnaire.b1_totalScore > 0) return true;
-    if (h.quickIncomeQuestionnaire && h.quickIncomeQuestionnaire.totalNetIncome > 0) return true;
     if (h.questionnaire && (
       h.questionnaire.muc1_has || 
       h.questionnaire.muc2_has || 
@@ -4053,6 +4052,9 @@ export default function App() {
             <img 
               src={bannerImg} 
               alt="Nông thôn Việt Nam" 
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src = '/background-ngoai-troi-dep_042633251.jpg';
+              }}
               className="w-full h-full object-cover" 
             />
             <div className="absolute inset-0 bg-linear-to-t from-sky-950 via-sky-950/60 to-transparent"></div>
@@ -4148,6 +4150,26 @@ export default function App() {
     );
   }
 
+  // TRANG RIÊNG BIỆT: PHẦN MỀM ĐIỀU TRA & TỔNG HỢP CÔNG NGHIỆP (DN, CÁ THỂ & BIỂU 03, 04)
+  if (appMode === 'industrial') {
+    return (
+      <IndustrialSurveyPage
+        currentUser={currentUser}
+        onSwitchToHousehold={() => {
+          setAppMode('household');
+          try {
+            localStorage.setItem('preferred_app_mode', 'household');
+            const url = new URL(window.location.href);
+            url.searchParams.set('mode', 'household');
+            window.history.replaceState({}, '', url.toString());
+          } catch (e) {}
+        }}
+        onLogout={handleLogout}
+        onNotification={showNotification}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-sky-50 text-slate-900 font-sans flex flex-col antialiased selection:bg-sky-200">
       
@@ -4186,6 +4208,9 @@ export default function App() {
           <img 
             src={bannerImg} 
             alt="Nông thôn Việt Nam" 
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).src = '/background-ngoai-troi-dep_042633251.jpg';
+            }}
             className="absolute inset-0 w-full h-full object-cover object-center brightness-110 saturate-110" 
           />
 
@@ -4205,6 +4230,20 @@ export default function App() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              {/* Nút mở sang Web 2 Điều Tra Công Nghiệp 
+              <a
+                href="/industrial.html"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 bg-linear-to-r from-amber-400 to-amber-300 hover:from-amber-300 hover:to-amber-200 text-blue-950 font-black rounded-xl shadow-lg flex items-center gap-1.5 transition-all text-xs cursor-pointer hover:scale-102"
+                title="Mở Trang Web Điều Tra Công Nghiệp trong Tab mới độc lập"
+              >
+                <Building2 className="w-3.5 h-3.5" />
+                <span>Mở Web 2 (Công Nghiệp) Tab Mới</span>
+                <ExternalLink className="w-3 h-3 ml-0.5" />
+              </a>
+              */}
+
               {/* Logged in User Profile & Actions */}
               <div className="flex items-center gap-2 bg-[#01159d]/90 backdrop-blur-md border border-white/30 rounded-xl px-3.5 py-2 text-xs shadow-xl">
                 <UserCheck className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -4243,6 +4282,29 @@ export default function App() {
           style={{ backgroundColor: '#207f8b' }}
           className="px-3 md:px-5 pt-1.5 border-t border-teal-600 border-b border-teal-800 flex items-center gap-1.5 overflow-x-auto text-xs w-full shadow-md z-20"
         >
+          {/* NÚT CHUYỂN SANG TRANG RIÊNG BIỆT: ĐIỀU TRA CÔNG NGHIỆP TỈNH HƯNG YÊN */}
+          {/*
+          <button 
+            type="button"
+            onClick={() => {
+              setAppMode('industrial');
+              try {
+                localStorage.setItem('preferred_app_mode', 'industrial');
+                const url = new URL(window.location.href);
+                url.searchParams.set('mode', 'industrial');
+                window.history.replaceState({}, '', url.toString());
+              } catch (e) {}
+            }}
+            className="px-4 py-2 flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap rounded-t-md font-bold bg-linear-to-r from-blue-900 to-indigo-900 hover:from-blue-800 hover:to-indigo-800 text-amber-300 hover:text-white border-t-2 border-x border-blue-500 shadow-md ring-1 ring-amber-400/30"
+            title="Mở giao diện Trang riêng biệt độc lập cho Phiếu 01, 02 và Biểu 03, 04"
+          >
+            <Building2 className="w-4 h-4 text-amber-300" />
+            <span className="font-black text-amber-300 hover:text-white">
+              ★ Trang Điều Tra Công Nghiệp (DN & Cá Thể)
+            </span>
+          </button>
+          */}
+
           {currentUser.role === 'ADMIN' && (
             <button 
               onClick={() => setActiveTab('import')}
@@ -4257,17 +4319,19 @@ export default function App() {
             </button>
           )}
 
-          <button 
-            onClick={() => setActiveTab('entry')}
-            className={`px-3.5 py-2 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap rounded-t-md font-bold ${
-              activeTab === 'entry' 
-                ? 'bg-white text-teal-950 shadow-md border-t-2 border-x border-slate-300 border-t-amber-500 font-black' 
-                : 'text-white hover:bg-teal-700/80 border-transparent'
-            }`}
-          >
-            <FileText className={`w-4 h-4 ${activeTab === 'entry' ? 'text-teal-800' : 'text-teal-100'}`} />
-            <span className={activeTab === 'entry' ? 'text-teal-950 font-black' : 'text-white'}>2. Nhập tin hộ</span>
-          </button>
+          {(currentUser.role === 'ADMIN' || currentUser.role === 'SUPERVISOR') && (
+            <button 
+              onClick={() => setActiveTab('entry')}
+              className={`px-3.5 py-2 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap rounded-t-md font-bold ${
+                activeTab === 'entry' 
+                  ? 'bg-white text-teal-950 shadow-md border-t-2 border-x border-slate-300 border-t-amber-500 font-black' 
+                  : 'text-white hover:bg-teal-700/80 border-transparent'
+              }`}
+            >
+              <FileText className={`w-4 h-4 ${activeTab === 'entry' ? 'text-teal-800' : 'text-teal-100'}`} />
+              <span className={activeTab === 'entry' ? 'text-teal-950 font-black' : 'text-white'}>2. Nhập tin hộ</span>
+            </button>
+          )}
 
           <button 
             onClick={() => setActiveTab('tnh')}
@@ -4508,6 +4572,37 @@ export default function App() {
 
       {/* Main Content Area - Full Screen Width */}
       <main className="flex-1 w-full px-3 md:px-5 py-3 flex flex-col gap-4">
+
+        {/* TAB ĐIỀU TRA CÔNG NGHIỆP: PHIẾU 01, PHIẾU 02, BIỂU 03 & 04 (UBND TỈNH HƯNG YÊN) */}
+        {activeTab === 'industrial_survey' && (
+          <div className="bg-white p-6 rounded-2xl border border-blue-200 shadow-lg text-center flex flex-col items-center justify-center gap-3 my-4">
+            <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center shadow-inner">
+              <Building2 className="w-8 h-8 text-blue-700" />
+            </div>
+            <h2 className="text-base font-black text-blue-950 uppercase">
+              Phần Mềm Điều Tra Công Nghiệp (DN & Cá Thể) Đã Được Tách Thành Trang Riêng Biệt
+            </h2>
+            <p className="text-xs text-slate-600 max-w-xl">
+              Để phục vụ nhập tin nhanh, thuận tiện và không sót chỉ tiêu, hệ thống đã đóng gói riêng thành 1 trang độc lập với đầy đủ chức năng Phiếu 01, Phiếu 02 và Biểu 03, 04.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setAppMode('industrial');
+                try {
+                  localStorage.setItem('preferred_app_mode', 'industrial');
+                  const url = new URL(window.location.href);
+                  url.searchParams.set('mode', 'industrial');
+                  window.history.replaceState({}, '', url.toString());
+                } catch (e) {}
+              }}
+              className="px-5 py-2.5 bg-blue-700 hover:bg-blue-800 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-2 hover:scale-102"
+            >
+              <Building2 className="w-4 h-4 text-amber-300" />
+              <span>Mở Ngay Trang Riêng Biệt Điều Tra Công Nghiệp</span>
+            </button>
+          </div>
+        )}
 
         {/* TAB 1: IMPORT FILE EXCEL & CONFIG */}
         {activeTab === 'import' && (
@@ -4958,6 +5053,14 @@ export default function App() {
                         <span className="text-sky-200 block text-[11px]">Nhân khẩu đã nhập tin:</span>
                         <strong className="text-lg font-black text-sky-200">{totalMembers} người</strong>
                         <span className="block text-[10px] text-sky-300 mt-0.5">Thu nhập tích lũy: {totalIncome.toLocaleString()} (kđ)</span>
+                      </div>
+                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
+                        <label className="text-amber-200 block text-[11px] font-bold mb-1">Ghi chú của giám sát viên:</label>
+                        <textarea
+                          className="w-full bg-white/5 border border-white/20 rounded p-1.5 text-white text-xs"
+                          rows={3}
+                          placeholder="Nhập ghi chú hoặc nhận xét tại đây..."
+                        />
                       </div>
                       <div className="bg-white/10 rounded p-2.5 border border-white/10">
                         <span className="text-amber-200 block text-[11px]">TNBQ bình quân tháng:</span>
