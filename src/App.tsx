@@ -174,7 +174,7 @@ export default function App() {
   const [communes, setCommunes] = useState<Commune[]>([]);
   const [areas, setAreas] = useState<SurveyArea[]>([]);
   const [households, setHouseholds] = useState<Household[]>([]);
-  const [surveyors, setSurveyors] = useState<Surveyor[]>([]);
+  const [surveyors, setSurveyors] = useState<Surveyor[]>(DEFAULT_SURVEYORS);
   const [departments, setDepartments] = useState<Department[]>([]);
 
   const [currentSurveyorId, setCurrentSurveyorId] = useState<string>('admin');
@@ -336,12 +336,8 @@ export default function App() {
   const [catalogExplorerTab, setCatalogExplorerTab] = useState<'muc2' | 'muc3' | 'muc4' | 'muc5' | 'muc6' | 'muc1' | 'muc7'>('muc2');
   const [catalogSearchTerm, setCatalogSearchTerm] = useState('');
 
+  // Load localStorage cache immediately on app start (no auth needed)
   useEffect(() => {
-    if (!isLoggedIn) {
-      setLoading(false);
-      return;
-    }
-
     setLoading(true);
 
     // Initial load from local cache if present or fallback to official communes catalog
@@ -398,6 +394,15 @@ export default function App() {
     } catch (e) {
       console.warn("Local storage cache load warning", e);
       setCommunes(OFFICIAL_COMMUNES_CATALOG);
+    }
+
+    setLoading(false);
+  }, []);
+
+  // Firestore listeners - only start after user is logged in
+  useEffect(() => {
+    if (!isLoggedIn) {
+      return;
     }
 
     const unsubCommunes = onSnapshot(collection(db, 'communes'), (snapshot) => {
@@ -2932,6 +2937,11 @@ export default function App() {
       try { localStorage.setItem('cached_surveyors', JSON.stringify(next)); } catch (e) {}
       return next;
     });
+    
+    // Không ghi default surveyors (id='admin' hoặc code='ADMIN') lên Firebase
+    if (surveyor.id === 'admin' || surveyor.code === 'ADMIN') {
+      return;
+    }
     
     await safeFirestoreWrite(async () => {
       await setDoc(doc(db, 'surveyors', surveyor.id), surveyor);
