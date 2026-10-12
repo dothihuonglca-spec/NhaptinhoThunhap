@@ -692,7 +692,12 @@ export default function App() {
       }
     } else if (currentUser.role === 'SURVEYOR') {
       if (!currentUser.assignedAreas.includes('ALL')) {
-        const myCommuneIds = new Set(areas.filter(a => currentUser.assignedAreas.includes(a.code)).map(a => a.communeId));
+        const myCommuneIds = new Set(areas.filter(a => 
+         currentUser.assignedAreas.includes('ALL') || 
+         currentUser.assignedAreas.includes(a.id) || 
+         currentUser.assignedAreas.includes(a.code) || 
+         currentUser.assignedAreas.includes(`${a.communeId}_${a.code}`)
+       ).map(a => a.communeId));
         return communes.filter(c => myCommuneIds.has(c.id) || myCommuneIds.has(c.communeCode));
       }
     }
@@ -710,7 +715,12 @@ export default function App() {
     if (currentUser) {
       if (currentUser.role === 'SURVEYOR') {
         if (!currentUser.assignedAreas.includes('ALL')) {
-          result = areas.filter(a => currentUser.assignedAreas.includes(a.code));
+          result = areas.filter(a => 
+            currentUser.assignedAreas.includes('ALL') || 
+            currentUser.assignedAreas.includes(a.id) || 
+            currentUser.assignedAreas.includes(a.code) || 
+            currentUser.assignedAreas.includes(`${a.communeId}_${a.code}`)
+          );
         }
       } else if (currentUser.role === 'SUPERVISOR') {
         if (currentUser.assignedCommunes && !currentUser.assignedCommunes.includes('ALL')) {
@@ -1024,11 +1034,26 @@ export default function App() {
   ) => {
     setUploadProgressText(`Đang lưu ${totalCount} hộ từ ${areasData.length} địa bàn...`);
 
+    // Ensure all matching old commune IDs by ID, code, or name are collected if isOverwrite
+    const allIdsToRemove = new Set(oldCommuneIdsToRemove);
+    if (isOverwrite) {
+      communes.forEach(c => {
+        if (
+          allIdsToRemove.has(c.id) ||
+          (communeData.id && c.id === communeData.id) ||
+          (communeData.communeCode && c.communeCode && c.communeCode.trim().toLowerCase() === communeData.communeCode.trim().toLowerCase()) ||
+          (communeData.communeName && c.communeName && c.communeName.trim().toLowerCase() === communeData.communeName.trim().toLowerCase())
+        ) {
+          allIdsToRemove.add(c.id);
+        }
+      });
+    }
+
     // 1. Update State & LocalStorage immediately
     setCommunes(prev => {
       let next: Commune[];
       if (isOverwrite) {
-        next = prev.filter(c => !oldCommuneIdsToRemove.includes(c.id)).concat([communeData]);
+        next = prev.filter(c => !allIdsToRemove.has(c.id)).concat([communeData]);
       } else {
         next = [...prev, communeData];
       }
@@ -1039,7 +1064,7 @@ export default function App() {
     setAreas(prev => {
       let next: SurveyArea[];
       if (isOverwrite) {
-        next = prev.filter(a => !oldCommuneIdsToRemove.includes(a.communeId)).concat(areasData);
+        next = prev.filter(a => !allIdsToRemove.has(a.communeId) && a.communeId !== communeData.id).concat(areasData);
       } else {
         next = [...prev, ...areasData];
       }
@@ -1050,7 +1075,13 @@ export default function App() {
     setHouseholds(prev => {
       let next: Household[];
       if (isOverwrite) {
-        next = prev.filter(h => !oldCommuneIdsToRemove.includes(h.communeId)).concat(householdsData);
+        next = prev.filter(h => {
+          if (allIdsToRemove.has(h.communeId)) return false;
+          if (h.communeId === communeData.id) return false;
+          if (communeData.communeCode && h.communeCode && h.communeCode.trim().toLowerCase() === communeData.communeCode.trim().toLowerCase()) return false;
+          if (communeData.communeName && h.communeName && h.communeName.trim().toLowerCase() === communeData.communeName.trim().toLowerCase()) return false;
+          return true;
+        }).concat(householdsData);
       } else {
         next = [...prev, ...householdsData];
       }
@@ -1058,10 +1089,54 @@ export default function App() {
       return next;
     });
 
+    // 2. Sync to Firestore synchronously and await completion
+    try {
+      setUploadProgressText(`Đang đồng bộ ${totalCount} hộ lên Firebase...`);
+      if (isOverwrite) {
+        const oldAreas = areas.filter(a => allIdsToRemove.has(a.communeId) || a.communeId === communeData.id);
+        const oldHhs = households.filter(h => 
+          allIdsToRemove.has(h.communeId) || 
+          h.communeId === communeData.id || 
+          (communeData.communeCode && h.communeCode && h.communeCode.trim().toLowerCase() === communeData.communeCode.trim().toLowerCase()) ||
+          (communeData.communeName && h.communeName && h.communeName.trim().toLowerCase() === communeData.communeName.trim().toLowerCase())
+        );
+        const toDeleteRefs = [
+          ...Array.from(allIdsToRemove).map(id => doc(db, 'communes', id)),
+          ...oldAreas.map(a => doc(db, 'surveyAreas', a.id)),
+          ...oldHhs.map(h => doc(db, 'households', h.id))
+        ];
+
+        for (let i = 0; i < toDeleteRefs.length; i += 300) {
+          const chunk = toDeleteRefs.slice(i, i + 300);
+          const batch = writeBatch(db);
+          chunk.forEach(r => batch.delete(r));
+          await batch.commit();
+        }
+      }
+
+      const allDocs = [
+        { ref: doc(db, 'communes', communeData.id), data: communeData },
+        ...areasData.map(a => ({ ref: doc(db, 'surveyAreas', a.id), data: a })),
+        ...householdsData.map(h => ({ ref: doc(db, 'households', h.id), data: h }))
+      ];
+
+      for (let i = 0; i < allDocs.length; i += 300) {
+        const chunk = allDocs.slice(i, i + 300);
+        const batch = writeBatch(db);
+        chunk.forEach(item => batch.set(item.ref, item.data));
+        await batch.commit();
+      }
+    } catch (bgErr: any) {
+      console.error("Firebase sync error during import:", bgErr);
+      handleFirestoreError(bgErr, OperationType.WRITE, 'households');
+      showNotification('error', `Cảnh báo: Đã lưu cục bộ nhưng đồng bộ Firebase gặp lỗi: ${bgErr?.message || 'Lỗi mạng'}`);
+    } finally {
+      setIsUploading(false);
+    }
+
     setSelectedCommuneId(communeData.id);
     setSelectedAreaId('ALL');
     setCurrentPage(1);
-    setIsUploading(false);
 
     if (skippedSheetsList.length > 0) {
       setUploadReport({
@@ -1070,52 +1145,15 @@ export default function App() {
         skippedSheets: skippedSheetsList
       });
       showNotification('success', isOverwrite 
-        ? `Đã GHI ĐÈ thành công xã [${communeData.communeCode}] ${communeData.communeName}: ${totalCount} hộ (${areasData.length} địa bàn).`
-        : `Đã nạp thành công ${totalCount} hộ (${areasData.length} địa bàn). Tự động loại bỏ ${skippedSheetsList.length} sheet không đúng mẫu/trống.`
+        ? `Đã GHI ĐÈ thành công xã [${communeData.communeCode}] ${communeData.communeName}: ${totalCount} hộ (${areasData.length} địa bàn) lên Firebase.`
+        : `Đã nạp thành công ${totalCount} hộ (${areasData.length} địa bàn) lên Firebase.`
       );
     } else {
       showNotification('success', isOverwrite 
-        ? `Đã GHI ĐÈ thành công dữ liệu xã [${communeData.communeCode}] ${communeData.communeName} (${areasData.length} địa bàn, ${totalCount} hộ).`
-        : `Đã import thành công ${totalCount} hộ từ toàn bộ ${areasData.length} địa bàn.`
+        ? `Đã GHI ĐÈ thành công dữ liệu xã [${communeData.communeCode}] ${communeData.communeName} (${areasData.length} địa bàn, ${totalCount} hộ) lên Firebase.`
+        : `Đã import thành công ${totalCount} hộ lên Firebase.`
       );
     }
-
-    // 2. Background Firestore write
-    setTimeout(async () => {
-      try {
-        if (isOverwrite && oldCommuneIdsToRemove.length > 0) {
-          const oldAreas = areas.filter(a => oldCommuneIdsToRemove.includes(a.communeId));
-          const oldHhs = households.filter(h => oldCommuneIdsToRemove.includes(h.communeId));
-          const toDeleteRefs = [
-            ...oldCommuneIdsToRemove.map(id => doc(db, 'communes', id)),
-            ...oldAreas.map(a => doc(db, 'surveyAreas', a.id)),
-            ...oldHhs.map(h => doc(db, 'households', h.id))
-          ];
-
-          for (let i = 0; i < toDeleteRefs.length; i += 300) {
-            const chunk = toDeleteRefs.slice(i, i + 300);
-            const batch = writeBatch(db);
-            chunk.forEach(r => batch.delete(r));
-            await batch.commit();
-          }
-        }
-
-        const allDocs = [
-          { ref: doc(db, 'communes', communeData.id), data: communeData },
-          ...areasData.map(a => ({ ref: doc(db, 'surveyAreas', a.id), data: a })),
-          ...householdsData.map(h => ({ ref: doc(db, 'households', h.id), data: h }))
-        ];
-
-        for (let i = 0; i < allDocs.length; i += 300) {
-          const chunk = allDocs.slice(i, i + 300);
-          const batch = writeBatch(db);
-          chunk.forEach(item => batch.set(item.ref, item.data));
-          await batch.commit();
-        }
-      } catch (bgErr) {
-        console.warn("Background Firebase sync warning:", bgErr);
-      }
-    }, 100);
   };
 
   const handleConfirmOverwriteCommune = async () => {
@@ -2201,7 +2239,13 @@ export default function App() {
       if (currentUser && currentUser.role !== 'ADMIN') {
         if (currentUser.role === 'SURVEYOR') {
           const isDirect = h.assignedSurveyorId === currentUser.id;
-          const isAreaMatch = currentUser.assignedAreas.includes('ALL') || currentUser.assignedAreas.includes(h.areaCode);
+          const isAreaMatch = currentUser.assignedAreas.includes('ALL') || 
+            currentUser.assignedAreas.includes(h.areaCode) || 
+            currentUser.assignedAreas.includes(h.areaId) ||
+            currentUser.assignedAreas.some(item => {
+              const ar = areas.find(a => a.id === item || a.code === item || `${a.communeId}_${a.code}` === item);
+              return ar && (ar.id === h.areaId || ar.code === h.areaCode || (ar.communeId === h.communeId && ar.code === h.areaCode));
+            });
           if (!isDirect && !isAreaMatch) return false;
         } else if (currentUser.role === 'SUPERVISOR') {
           if (currentUser.assignedCommunes && !currentUser.assignedCommunes.includes('ALL')) {
@@ -2265,7 +2309,14 @@ export default function App() {
 
       // 9. Lọc chỉ hộ tôi phụ trách
       if (onlyMyHouseholds && currentUser) {
-        const isMine = h.assignedSurveyorId === currentUser.id || currentUser.assignedAreas.includes('ALL') || currentUser.assignedAreas.includes(h.areaCode);
+        const isMine = h.assignedSurveyorId === currentUser.id || 
+          currentUser.assignedAreas.includes('ALL') || 
+          currentUser.assignedAreas.includes(h.areaCode) || 
+          currentUser.assignedAreas.includes(h.areaId) ||
+          currentUser.assignedAreas.some(item => {
+            const ar = areas.find(a => a.id === item || a.code === item || `${a.communeId}_${a.code}` === item);
+            return ar && (ar.id === h.areaId || ar.code === h.areaCode || (ar.communeId === h.communeId && ar.code === h.areaCode));
+          });
         if (!isMine) return false;
       }
 
@@ -2389,7 +2440,12 @@ export default function App() {
         list = list.filter(h => 
           h.assignedSurveyorId === currentUser.id || 
           currentUser.assignedAreas.includes('ALL') || 
-          currentUser.assignedAreas.includes(h.areaCode)
+          currentUser.assignedAreas.includes(h.areaCode) ||
+          currentUser.assignedAreas.includes(h.areaId) ||
+          currentUser.assignedAreas.some(item => {
+            const ar = areas.find(a => a.id === item || a.code === item || `${a.communeId}_${a.code}` === item);
+            return ar && (ar.id === h.areaId || ar.code === h.areaCode || (ar.communeId === h.communeId && ar.code === h.areaCode));
+          })
         );
       }
     }
@@ -2625,7 +2681,10 @@ export default function App() {
           if (!currentUser.assignedAreas.includes('ALL')) {
             const hasMyAreas = areas.some(a => 
               (a.communeId === item.commune.id || (a as any).communeCode === item.commune.communeCode) &&
-              currentUser.assignedAreas.includes(a.code)
+              (currentUser.assignedAreas.includes('ALL') || 
+               currentUser.assignedAreas.includes(a.id) || 
+               currentUser.assignedAreas.includes(a.code) || 
+               currentUser.assignedAreas.includes(`${a.communeId}_${a.code}`))
             );
             if (!hasMyAreas) return false;
           }
@@ -2652,7 +2711,12 @@ export default function App() {
       currentUser.role === 'ADMIN' ? true :
       (h.assignedSurveyorId === currentUser.id || 
        currentUser.assignedAreas.includes('ALL') || 
-       currentUser.assignedAreas.includes(h.areaCode))
+       currentUser.assignedAreas.includes(h.areaCode) ||
+       currentUser.assignedAreas.includes(h.areaId) ||
+       currentUser.assignedAreas.some(item => {
+         const ar = areas.find(a => a.id === item || a.code === item || `${a.communeId}_${a.code}` === item);
+         return ar && (ar.id === h.areaId || ar.code === h.areaCode || (ar.communeId === h.communeId && ar.code === h.areaCode));
+       }))
     );
 
     const map = new Map<string, {
@@ -4838,7 +4902,10 @@ export default function App() {
                   >
                     <span>📌 Chỉ hộ tôi phụ trách</span>
                     <span className={`px-1.5 py-0.2 rounded text-[10px] ${onlyMyHouseholds ? 'bg-sky-900 text-sky-100' : 'bg-slate-200 text-slate-700'}`}>
-                      {households.filter(h => h.assignedSurveyorId === currentUser.id || currentUser.assignedAreas.includes('ALL') || currentUser.assignedAreas.includes(h.areaCode)).length}
+                      {households.filter(h => h.assignedSurveyorId === currentUser.id || currentUser.assignedAreas.includes('ALL') || currentUser.assignedAreas.includes(h.areaCode) || currentUser.assignedAreas.includes(h.areaId) || currentUser.assignedAreas.some(item => {
+                        const ar = areas.find(a => a.id === item || a.code === item || `${a.communeId}_${a.code}` === item);
+                        return ar && (ar.id === h.areaId || ar.code === h.areaCode || (ar.communeId === h.communeId && ar.code === h.areaCode));
+                      })).length}
                     </span>
                   </button>
                 )}

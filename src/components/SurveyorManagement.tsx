@@ -71,7 +71,7 @@ export default function SurveyorManagement({
   onSelectActiveUser,
   showNotification
 }: SurveyorManagementProps) {
-  const [subTab, setSubTab] = useState<'departments' | 'surveyors'>(currentUser.role === 'SUPERVISOR' ? 'surveyors' : 'departments');
+  const [subTab, setSubTab] = useState<'departments' | 'surveyors'>('surveyors');
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
   const [deptFilter, setDeptFilter] = useState<string>('ALL');
@@ -107,9 +107,20 @@ export default function SurveyorManagement({
   const [formDeptId, setFormDeptId] = useState<string>('pb_01');
   const [formPosition, setFormPosition] = useState('');
   const [formAllAreas, setFormAllAreas] = useState<boolean>(false);
-  const [formAssignedAreas, setFormAssignedAreas] = useState<string[]>([]);
-  // Commune filter when assigning areas in Surveyor Modal
+  const [formAssignedAreas, setFormAssignedAreas] = useState<string[]>([]); // stores area.ids
+  // Commune & TKCS filter when assigning areas in Surveyor Modal
+  const [modalTkcsFilter, setModalTkcsFilter] = useState<string>('ALL');
   const [modalAreaCommuneFilter, setModalAreaCommuneFilter] = useState<string>(communes[0]?.id || 'ALL');
+
+  const uniqueTkcsList = React.useMemo(() => {
+    const map = new Map<string, string>();
+    communes.forEach(c => {
+      const code = c.tkcsCode || 'TKCS-01';
+      const name = c.tkcsName || 'Thống kê cơ sở';
+      map.set(code, `${code} - ${name}`);
+    });
+    return Array.from(map.entries()).map(([code, label]) => ({ code, label }));
+  }, [communes]);
   // Supervisor commune assignment state
   const [formAllCommunes, setFormAllCommunes] = useState<boolean>(false);
   const [formAssignedCommunes, setFormAssignedCommunes] = useState<string[]>([]);
@@ -172,7 +183,8 @@ export default function SurveyorManagement({
     setFormDeptId(currentUser.role === 'SUPERVISOR' ? (currentUser.departmentId || 'pb_01') : (defaultDeptId || (departments[0]?.id || 'pb_01')));
     setFormPosition('Cán bộ điều tra viên');
     setFormAllAreas(false);
-    setFormAssignedAreas(areas.length > 0 ? [areas[0].code] : []);
+    setFormAssignedAreas([]);
+    setModalTkcsFilter('ALL');
     setModalAreaCommuneFilter(communes[0]?.id || 'ALL');
     setFormAllCommunes(false);
     setFormAssignedCommunes([]);
@@ -195,7 +207,14 @@ export default function SurveyorManagement({
     setFormDeptId(s.departmentId || 'pb_01');
     setFormPosition(s.position || '');
     setFormAllAreas(s.assignedAreas.includes('ALL'));
-    setFormAssignedAreas(s.assignedAreas.filter(a => a !== 'ALL'));
+    const matchedIds = areas.filter(a => 
+      s.assignedAreas.includes(a.id) || 
+      s.assignedAreas.includes(`${a.communeId}_${a.code}`) ||
+      (a as any).communeCode && s.assignedAreas.includes(`${(a as any).communeCode}_${a.code}`) ||
+      (s.assignedAreas.includes(a.code) && areas.filter(x => x.code === a.code).length === 1)
+    ).map(a => a.id);
+    setFormAssignedAreas(matchedIds);
+    setModalTkcsFilter('ALL');
     setModalAreaCommuneFilter(communes[0]?.id || 'ALL');
     setFormAllCommunes(Boolean(s.assignedCommunes?.includes('ALL')));
     setFormAssignedCommunes(s.assignedCommunes ? s.assignedCommunes.filter(c => c !== 'ALL') : []);
@@ -240,7 +259,10 @@ export default function SurveyorManagement({
 
     try {
       setIsSubmitting(true);
-      const assigned = formAllAreas ? ['ALL'] : formAssignedAreas;
+      const assigned = formAllAreas ? ['ALL'] : Array.from(new Set(formAssignedAreas.map(id => {
+        const ar = areas.find(a => a.id === id);
+        return ar ? ar.id : id;
+      })));
       const assignedComm = formAllCommunes ? ['ALL'] : formAssignedCommunes;
       const matchedDept = departments.find(d => d.id === formDeptId);
 
@@ -255,7 +277,7 @@ export default function SurveyorManagement({
         departmentId: formDeptId,
         department: matchedDept ? matchedDept.name : formDeptId,
         position: formPosition.trim(),
-        assignedAreas: assigned.length === 0 ? ['ALL'] : assigned,
+        assignedAreas: assigned,
         assignedCommunes: formRole === 'SUPERVISOR' 
           ? (formAllCommunes ? ['ALL'] : (assignedComm.length === 0 ? ['ALL'] : assignedComm)) 
           : undefined,
@@ -334,11 +356,11 @@ export default function SurveyorManagement({
     }
   };
 
-  const handleToggleAreaCheckbox = (code: string) => {
-    if (formAssignedAreas.includes(code)) {
-      setFormAssignedAreas(formAssignedAreas.filter(c => c !== code));
+  const handleToggleAreaCheckbox = (areaId: string) => {
+    if (formAssignedAreas.includes(areaId)) {
+      setFormAssignedAreas(formAssignedAreas.filter(id => id !== areaId));
     } else {
-      setFormAssignedAreas([...formAssignedAreas, code]);
+      setFormAssignedAreas([...formAssignedAreas, areaId]);
     }
   };
 
@@ -401,7 +423,10 @@ export default function SurveyorManagement({
       );
 
       const matchesSurveyor = s.assignedAreas.includes('ALL') || 
-        s.assignedAreas.some(code => communeAreaCodes.has(code));
+        s.assignedAreas.some(item => {
+          const ar = areas.find(a => a.id === item || a.code === item || `${a.communeId}_${a.code}` === item);
+          return ar && (ar.communeId === cId || (ar as any).communeCode === cCode);
+        });
 
       const matchesAdmin = s.role === 'ADMIN';
 
@@ -976,15 +1001,16 @@ export default function SurveyorManagement({
                             </span>
                           ) : (
                             <div className="flex flex-wrap gap-1">
-                              {s.assignedAreas.map(code => {
-                                const areaObj = areas.find(a => a.code === code);
+                              {s.assignedAreas.map(item => {
+                                const areaObj = areas.find(a => a.id === item || a.code === item || `${a.communeId}_${a.code}` === item);
+                                const commObj = areaObj ? communes.find(c => c.id === areaObj.communeId || c.communeCode === (areaObj as any).communeCode) : null;
                                 return (
                                   <span
-                                    key={code}
+                                    key={item}
                                     className="px-2 py-0.5 rounded font-bold text-[11px] bg-sky-100 text-sky-900 border border-sky-300 inline-flex items-center gap-1"
                                   >
                                     <MapPin className="w-3 h-3 text-sky-700" />
-                                    <span>ĐB {code} {areaObj ? `(${areaObj.name})` : ''}</span>
+                                    <span>ĐB {areaObj ? areaObj.code : item} {commObj ? `(${commObj.communeName})` : ''}</span>
                                   </span>
                                 );
                               })}
@@ -1392,62 +1418,93 @@ export default function SurveyorManagement({
 
                   {!formAllAreas ? (
                     <div className="flex flex-col gap-2 bg-white p-2.5 rounded border border-slate-200">
-                      {/* Bộ lọc theo Xã trong modal - Giúp chỉ hiện địa bàn của xã đó */}
+                      {/* Bộ lọc theo TKCS và Xã trong modal */}
                       <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-slate-200">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-slate-700 text-[11px]">Lọc hiển thị theo Xã:</span>
-                          <select
-                            value={modalAreaCommuneFilter}
-                            onChange={e => setModalAreaCommuneFilter(e.target.value)}
-                            className="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs font-bold text-slate-800 focus:outline-none"
-                          >
-                            {communes.map(c => (
-                              <option key={c.id} value={c.id}>
-                                [{c.communeCode}] {c.communeName}
-                              </option>
-                            ))}
-                          </select>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <div className="flex items-center gap-1">
+                            <span className="font-bold text-slate-700 text-[11px]">TKCS:</span>
+                            <select
+                              value={modalTkcsFilter}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setModalTkcsFilter(val);
+                                const filteredComms = val === 'ALL' ? communes : communes.filter(c => (c.tkcsCode || 'TKCS-01') === val);
+                                if (filteredComms.length > 0 && !filteredComms.some(c => c.id === modalAreaCommuneFilter)) {
+                                  setModalAreaCommuneFilter(filteredComms[0].id);
+                                }
+                              }}
+                              className="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs font-bold text-slate-800 focus:outline-none"
+                            >
+                              <option value="ALL">Tất cả TKCS</option>
+                              {uniqueTkcsList.map(t => (
+                                <option key={t.code} value={t.code}>{t.label}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <span className="font-bold text-slate-700 text-[11px]">Xã:</span>
+                            <select
+                              value={modalAreaCommuneFilter}
+                              onChange={e => setModalAreaCommuneFilter(e.target.value)}
+                              className="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs font-bold text-slate-800 focus:outline-none"
+                            >
+                              {(modalTkcsFilter === 'ALL' ? communes : communes.filter(c => (c.tkcsCode || 'TKCS-01') === modalTkcsFilter)).map(c => (
+                                <option key={c.id} value={c.id}>
+                                  [{c.communeCode}] {c.communeName}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
 
                         <div className="flex items-center gap-2 text-xs shrink-0">
                           <button
                             type="button"
                             onClick={() => {
+                              const filteredComms = modalTkcsFilter === 'ALL' ? communes : communes.filter(c => (c.tkcsCode || 'TKCS-01') === modalTkcsFilter);
+                              const targetCommuneIds = modalAreaCommuneFilter === 'ALL' ? filteredComms.map(c => c.id) : [modalAreaCommuneFilter];
                               const commAreas = areas
-                                .filter(a => a.communeId === modalAreaCommuneFilter || (a as any).communeCode === modalAreaCommuneFilter)
-                                .map(a => a.code);
+                                .filter(a => targetCommuneIds.includes(a.communeId) || targetCommuneIds.includes((a as any).communeCode))
+                                .map(a => a.id);
                               const combined = Array.from(new Set([...formAssignedAreas, ...commAreas]));
                               setFormAssignedAreas(combined);
                             }}
                             className="text-[11px] text-sky-700 hover:underline font-bold"
                           >
-                            Chọn tất cả ĐB xã này
+                            Chọn tất cả ĐB
                           </button>
                           <span className="text-slate-300">|</span>
                           <button
                             type="button"
                             onClick={() => {
+                              const filteredComms = modalTkcsFilter === 'ALL' ? communes : communes.filter(c => (c.tkcsCode || 'TKCS-01') === modalTkcsFilter);
+                              const targetCommuneIds = modalAreaCommuneFilter === 'ALL' ? filteredComms.map(c => c.id) : [modalAreaCommuneFilter];
                               const commAreas = areas
-                                .filter(a => a.communeId === modalAreaCommuneFilter || (a as any).communeCode === modalAreaCommuneFilter)
-                                .map(a => a.code);
+                                .filter(a => targetCommuneIds.includes(a.communeId) || targetCommuneIds.includes((a as any).communeCode))
+                                .map(a => a.id);
                               setFormAssignedAreas(formAssignedAreas.filter(c => !commAreas.includes(c)));
                             }}
                             className="text-[11px] text-rose-700 hover:underline font-bold"
                           >
-                            Bỏ chọn ĐB xã này
+                            Bỏ chọn ĐB
                           </button>
                         </div>
                       </div>
 
-                      {/* Danh sách địa bàn hiển thị theo bộ lọc xã */}
+                      {/* Danh sách địa bàn hiển thị theo bộ lọc TKCS và xã */}
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5 max-h-40 overflow-y-auto p-1 bg-white rounded">
                         {areas
                           .filter(a => {
+                            const commObj = communes.find(c => c.id === a.communeId || c.communeCode === (a as any).communeCode);
+                            if (modalTkcsFilter !== 'ALL' && commObj && (commObj.tkcsCode || 'TKCS-01') !== modalTkcsFilter) {
+                              return false;
+                            }
                             if (modalAreaCommuneFilter === 'ALL') return true;
                             return a.communeId === modalAreaCommuneFilter || (a as any).communeCode === modalAreaCommuneFilter;
                           })
                           .map(area => {
-                            const isChecked = formAssignedAreas.includes(area.code);
+                            const isChecked = formAssignedAreas.includes(area.id);
                             const commObj = communes.find(c => c.id === area.communeId || c.communeCode === (area as any).communeCode);
                             return (
                               <label
@@ -1459,7 +1516,7 @@ export default function SurveyorManagement({
                                 <input
                                   type="checkbox"
                                   checked={isChecked}
-                                  onChange={() => handleToggleAreaCheckbox(area.code)}
+                                  onChange={() => handleToggleAreaCheckbox(area.id)}
                                   className="rounded text-sky-700"
                                 />
                                 <span>
@@ -1468,9 +1525,16 @@ export default function SurveyorManagement({
                               </label>
                             );
                           })}
-                        {areas.filter(a => modalAreaCommuneFilter === 'ALL' || a.communeId === modalAreaCommuneFilter || (a as any).communeCode === modalAreaCommuneFilter).length === 0 && (
+                        {areas.filter(a => {
+                          const commObj = communes.find(c => c.id === a.communeId || c.communeCode === (a as any).communeCode);
+                          if (modalTkcsFilter !== 'ALL' && commObj && (commObj.tkcsCode || 'TKCS-01') !== modalTkcsFilter) {
+                            return false;
+                          }
+                          if (modalAreaCommuneFilter === 'ALL') return true;
+                          return a.communeId === modalAreaCommuneFilter || (a as any).communeCode === modalAreaCommuneFilter;
+                        }).length === 0 && (
                           <div className="col-span-3 text-center py-3 text-slate-400 italic text-xs">
-                            Xã này chưa có địa bàn nào được tải lên.
+                            Không tìm thấy địa bàn nào phù hợp.
                           </div>
                         )}
                       </div>
