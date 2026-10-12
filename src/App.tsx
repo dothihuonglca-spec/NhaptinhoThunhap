@@ -337,6 +337,11 @@ export default function App() {
   const [catalogSearchTerm, setCatalogSearchTerm] = useState('');
 
   useEffect(() => {
+    if (!isLoggedIn) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
 
     // Initial load from local cache if present or fallback to official communes catalog
@@ -568,7 +573,7 @@ export default function App() {
       unsubSurveyors();
       unsubDepartments();
     };
-  }, []);
+  }, [isLoggedIn]);
 
   const currentUser: Surveyor = useMemo(() => {
     const found = surveyors.find(s => s.id === currentSurveyorId);
