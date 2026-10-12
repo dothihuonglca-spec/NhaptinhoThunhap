@@ -363,7 +363,7 @@ export const IncomeMacroControl: React.FC<IncomeMacroControlProps> = ({
   };
 
   return (
-    <div className="flex flex-col gap-4 p-3 md:p-5 max-w-[1700px] mx-auto animate-in fade-in duration-200">
+    <div className="flex flex-col gap-4 p-3 md:p-5 w-full animate-in fade-in duration-200">
       
       {/* HEADER & EXECUTIVE KPI SUMMARY BANNER */}
       <div className="bg-gradient-to-r from-teal-800 via-sky-800 to-teal-900 rounded-xl p-4 md:p-5 text-white shadow-lg border border-teal-600/40">

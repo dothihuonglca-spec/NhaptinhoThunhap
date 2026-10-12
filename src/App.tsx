@@ -11,7 +11,7 @@ import {
   AlertCircle, RefreshCw, Filter, Search, ChevronRight, ChevronLeft, ChevronsLeft, ChevronsRight,
   Check, Cloud, FileText, Loader2, TableProperties, MapPin, Building2, Hash, BookOpen, Copy, 
   Shield, ShieldCheck, Lock, Unlock, Eye, EyeOff, CheckSquare, Square, UserCheck, ShieldAlert, AlertTriangle, X,
-  LogOut, LogIn, KeyRound, User, TrendingUp, ExternalLink
+  LogOut, LogIn, KeyRound, User, TrendingUp, ExternalLink, RotateCcw
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType, safeFirestoreWrite, isQuotaExceeded } from './firebase';
 import { collection, getDocs, addDoc, deleteDoc, doc, setDoc, query, onSnapshot, writeBatch } from 'firebase/firestore';
@@ -21,6 +21,7 @@ import { calculateFullIncome } from './utils/incomeCalculator';
 import QuestionnaireModal from './components/QuestionnaireModal';
 import CatalogModal from './components/CatalogModal';
 import SurveyorManagement from './components/SurveyorManagement';
+import { SurveyorProgressView } from './components/SurveyorProgressView';
 import ExcelHeaderConfigModal from './components/ExcelHeaderConfigModal';
 import { IncomeMacroControl } from './components/IncomeMacroControl';
 import { ReplaceHouseholdModal } from './components/ReplaceHouseholdModal';
@@ -78,6 +79,7 @@ export interface Household {
   areaId: string;
   areaCode: string; // 001, 002, 003...
   areaName: string; // Tên sheet trong file Excel
+  sheetName?: string; // Tên sheet gốc
   sttMau: string;
   sampleStatus: string;
   sttGoc: string;
@@ -101,6 +103,7 @@ export interface Household {
 export interface SurveyArea {
   id: string;
   communeId: string;
+  communeCode?: string;
   code: string; // 001, 002...
   name: string; // Tên sheet
   householdCount?: number;
@@ -165,7 +168,7 @@ export default function App() {
     return 'industrial'; // Mặc định mở Trang chuyên dụng Điều tra Công nghiệp theo yêu cầu người dùng
   });
 
-  const [activeTab, setActiveTab] = useState<'industrial_survey' | 'import' | 'entry' | 'tnh' | 'macro_control' | 'database' | 'catalog' | 'surveyors'>('import');
+  const [activeTab, setActiveTab] = useState<'industrial_survey' | 'import' | 'entry' | 'surveyor_progress' | 'tnh' | 'macro_control' | 'database' | 'catalog' | 'surveyors'>('import');
   
   const [communes, setCommunes] = useState<Commune[]>([]);
   const [areas, setAreas] = useState<SurveyArea[]>([]);
@@ -265,7 +268,7 @@ export default function App() {
   const [householdToDelete, setHouseholdToDelete] = useState<Household | null>(null);
   const [isBatchDeleteModalOpen, setIsBatchDeleteModalOpen] = useState<boolean>(false);
   const [isResetQuestionnaireModalOpen, setIsResetQuestionnaireModalOpen] = useState<boolean>(false);
-  const [resetTargetType, setResetTargetType] = useState<'area' | 'selected' | 'all_filtered'>('area');
+  const [resetTargetType, setResetTargetType] = useState<'all_system_surveyed' | 'commune_surveyed' | 'area' | 'selected' | 'all_filtered'>('all_system_surveyed');
   const [resetCommuneId, setResetCommuneId] = useState<string>('ALL');
   const [resetAreaId, setResetAreaId] = useState<string>('ALL');
   const [isResettingQuestionnaire, setIsResettingQuestionnaire] = useState<boolean>(false);
@@ -424,11 +427,18 @@ export default function App() {
 
     const unsubAreas = onSnapshot(collection(db, 'surveyAreas'), (snapshot) => {
       const ars: SurveyArea[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as SurveyArea));
-      setAreas(ars);
       if (ars.length > 0) {
+        setAreas(ars);
         try { localStorage.setItem('cached_areas', JSON.stringify(ars)); } catch (e) {}
       } else {
-        localStorage.removeItem('cached_areas');
+        // Không tự ý xóa bộ nhớ đệm nếu Firestore trống hoặc tạm thời chưa có dữ liệu
+        const cachedA = localStorage.getItem('cached_areas');
+        if (cachedA) {
+          try {
+            const parsed = JSON.parse(cachedA);
+            if (Array.isArray(parsed) && parsed.length > 0) setAreas(parsed);
+          } catch (e) {}
+        }
       }
     }, (err) => {
       console.warn("Firestore areas warning:", err);
@@ -486,11 +496,20 @@ export default function App() {
           assignedSurveyorName: data.assignedSurveyorName || ''
         } as Household;
       });
-      setHouseholds(hhs);
       if (hhs.length > 0) {
+        setHouseholds(hhs);
         try { localStorage.setItem('cached_households', JSON.stringify(hhs)); } catch (e) {}
       } else {
-        localStorage.removeItem('cached_households');
+        // Không tự ý xóa dữ liệu máy người dùng nếu Firestore tạm thời chưa trả về dữ liệu
+        const cachedH = localStorage.getItem('cached_households');
+        if (cachedH) {
+          try {
+            const parsed = JSON.parse(cachedH);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setHouseholds(parsed);
+            }
+          } catch (e) {}
+        }
       }
       setLoading(false);
     }, (err) => {
@@ -572,19 +591,25 @@ export default function App() {
           }
         }
 
-        // 2. Khôi phục tên địa bàn (tên sheet)
+        // 2. Khôi phục tên địa bàn (Lấy chính xác tên sheet làm tên địa bàn, loại bỏ 001 hoặc mã số thô)
+        const exactSheet = ((updated as any).sheetName || '').trim();
         const curName = (updated.areaName || '').trim();
-        if (!curName || curName === 'Địa bàn' || curName === '---') {
+        const isCurNameBad = !curName || curName === '001' || curName === updated.areaCode || curName === 'Địa bàn' || curName === '---' || curName.startsWith('Địa bàn 001');
+
+        if (exactSheet && exactSheet !== '001' && exactSheet !== 'Địa bàn' && exactSheet !== '---' && !exactSheet.startsWith('Địa bàn 001')) {
+          if (updated.areaName !== exactSheet) {
+            updated.areaName = exactSheet;
+            changed = true;
+          }
+        } else if (isCurNameBad) {
           const matchedArea = areas.find(a => 
             (updated.areaId && a.id === updated.areaId) || 
-            (a.code === updated.areaCode && (!updated.communeId || a.communeId === updated.communeId || (a as any).communeCode === updated.communeCode))
-          ) || areas.find(a => a.code === updated.areaCode);
+            (a.code === updated.areaCode && (a.communeId === updated.communeId || (a as any).communeCode === updated.communeCode))
+          );
 
-          if (matchedArea?.name && matchedArea.name.trim() && matchedArea.name !== 'Địa bàn') {
+          if (matchedArea?.name && matchedArea.name.trim() && matchedArea.name !== '001' && matchedArea.name !== matchedArea.code && matchedArea.name !== 'Địa bàn' && !matchedArea.name.startsWith('Địa bàn 001')) {
             updated.areaName = matchedArea.name.trim();
-            changed = true;
-          } else if ((updated as any).sheetName && (updated as any).sheetName.trim()) {
-            updated.areaName = (updated as any).sheetName.trim();
+            updated.sheetName = matchedArea.name.trim();
             changed = true;
           }
         }
@@ -601,29 +626,32 @@ export default function App() {
         try { localStorage.setItem('cached_households', JSON.stringify(healedHouseholds)); } catch (e) {}
       }
 
-      // Tự động khôi phục danh mục areas nếu đang trống mà households đã có
+      // Tự động khôi phục hoặc cập nhật danh mục areas từ tên sheet của households
       if (areas.length === 0) {
         const areaMap = new Map<string, SurveyArea>();
         households.forEach(h => {
           const aCode = h.areaCode || '001';
-          const cId = h.communeId || 'commune-default';
+          const cId = h.communeId || (h.communeCode ? `c-${h.communeCode}` : 'commune-default');
           const key = `${cId}-${aCode}`;
+          const sheetNameVal = ((h as any).sheetName && (h as any).sheetName.trim() && (h as any).sheetName !== '001' && (h as any).sheetName !== 'Địa bàn')
+            ? (h as any).sheetName.trim()
+            : (h.areaName && h.areaName.trim() && h.areaName !== '001' && h.areaName !== 'Địa bàn' && h.areaName !== aCode)
+            ? h.areaName.trim()
+            : `Địa bàn ${aCode}`;
+
           if (!areaMap.has(key)) {
-            const rawName = (h.areaName && h.areaName.trim() && h.areaName !== 'Địa bàn') 
-              ? h.areaName.trim() 
-              : ((h as any).sheetName || `Địa bàn ${aCode}`);
             areaMap.set(key, {
               id: h.areaId || `area-${cId}-${aCode}`,
               communeId: cId,
               code: aCode,
-              name: rawName,
+              name: sheetNameVal,
               householdCount: 1
             });
           } else {
             const item = areaMap.get(key)!;
             item.householdCount = (item.householdCount || 0) + 1;
-            if ((!item.name || item.name === 'Địa bàn') && h.areaName && h.areaName !== 'Địa bàn') {
-              item.name = h.areaName;
+            if ((!item.name || item.name === '001' || item.name === item.code || item.name === 'Địa bàn' || item.name.startsWith('Địa bàn ')) && sheetNameVal !== `Địa bàn ${aCode}`) {
+              item.name = sheetNameVal;
             }
           }
         });
@@ -632,6 +660,55 @@ export default function App() {
           setAreas(reconstructed);
           try { localStorage.setItem('cached_areas', JSON.stringify(reconstructed)); } catch (e) {}
         }
+      } else {
+        // Nếu areas đã có nhưng có phần tử mang tên 001 hoặc chưa lấy đúng tên sheet từ bảng kê
+        let needUpdateAreas = false;
+        const cleanedAreas = areas.map(a => {
+          const isBadName = !a.name || a.name === '001' || a.name === a.code || a.name === 'Địa bàn' || a.name.startsWith('Địa bàn 001');
+          if (isBadName) {
+            const matchingH = households.find(h => 
+              (h.areaId === a.id || (h.areaCode === a.code && (h.communeId === a.communeId || (h as any).communeCode === a.communeCode))) &&
+              Boolean((h as any).sheetName || h.areaName) &&
+              (h as any).sheetName !== '001' && h.areaName !== '001' &&
+              (h as any).sheetName !== 'Địa bàn' && h.areaName !== 'Địa bàn' &&
+              !(h as any).sheetName?.startsWith('Địa bàn 001') && !h.areaName?.startsWith('Địa bàn 001')
+            );
+            const resolvedName = ((matchingH as any)?.sheetName && (matchingH as any).sheetName !== '001' && (matchingH as any).sheetName !== 'Địa bàn')
+              ? (matchingH as any).sheetName.trim()
+              : (matchingH?.areaName && matchingH.areaName !== '001' && matchingH.areaName !== matchingH.areaCode)
+              ? matchingH.areaName.trim()
+              : null;
+            if (resolvedName && resolvedName !== a.name) {
+              needUpdateAreas = true;
+              return { ...a, name: resolvedName };
+            }
+          }
+          return a;
+        });
+
+        if (needUpdateAreas) {
+          setAreas(cleanedAreas);
+          try { localStorage.setItem('cached_areas', JSON.stringify(cleanedAreas)); } catch (e) {}
+        }
+      }
+
+      // Tự động làm sạch các tài khoản điều tra viên nếu có gán nhầm mã 001
+      const hasBadSurveyor = surveyors.some(s => s.assignedAreas?.includes('001'));
+      if (hasBadSurveyor && areas.length > 0) {
+        const cleanedSurveyors = surveyors.map(s => {
+          if (s.assignedAreas?.includes('001')) {
+            const matchingArea001 = areas.find(a => a.code === '001');
+            const newAreas = s.assignedAreas.filter(x => x !== '001');
+            if (matchingArea001) newAreas.push(matchingArea001.id);
+            return {
+              ...s,
+              assignedAreas: Array.from(new Set(newAreas))
+            };
+          }
+          return s;
+        });
+        setSurveyors(cleanedSurveyors);
+        try { localStorage.setItem('cached_surveyors', JSON.stringify(cleanedSurveyors)); } catch (e) {}
       }
     }
   }, [areas, communes, households]);
@@ -1067,12 +1144,21 @@ export default function App() {
       return next;
     });
 
+    const preparedAreasData: SurveyArea[] = areasData.map(a => ({
+      ...a,
+      communeCode: a.communeCode || communeData.communeCode
+    }));
+
     setAreas(prev => {
       let next: SurveyArea[];
       if (isOverwrite) {
-        next = prev.filter(a => !allIdsToRemove.has(a.communeId) && a.communeId !== communeData.id).concat(areasData);
+        next = prev.filter(a => 
+          !allIdsToRemove.has(a.communeId) && 
+          a.communeId !== communeData.id &&
+          (!communeData.communeCode || !a.communeCode || a.communeCode !== communeData.communeCode)
+        ).concat(preparedAreasData);
       } else {
-        next = [...prev, ...areasData];
+        next = [...prev, ...preparedAreasData];
       }
       try { localStorage.setItem('cached_areas', JSON.stringify(next)); } catch (e) {}
       return next;
@@ -1782,6 +1868,7 @@ export default function App() {
         const newArea: SurveyArea = {
           id: areaId,
           communeId: newCommuneId,
+          communeCode: communeCodeFinal || detectedCommuneCode || '',
           code: areaCode,
           name: areaNameFinal,
           householdCount: finalizedHouseholds.length
@@ -2142,6 +2229,7 @@ export default function App() {
         const newArea: SurveyArea = {
           id: areaId,
           communeId: commune.id,
+          communeCode: commune.communeCode,
           code: areaCode,
           name: areaNameFinal,
           householdCount: finalizedHouseholds.length
@@ -2866,12 +2954,17 @@ export default function App() {
     await handleSaveDepartment(updated);
   };
 
-  const handleBatchAssignArea = async (surveyorId: string, areaCode: string) => {
+  const handleBatchAssignArea = async (surveyorId: string, areaIdOrCode: string) => {
     const targetSurveyor = surveyors.find(s => s.id === surveyorId);
     if (!targetSurveyor) return;
 
+    const targetArea = areas.find(a => a.id === areaIdOrCode || a.code === areaIdOrCode);
+
     const updatedHouseholds = households.map(h => {
-      if (h.areaCode === areaCode) {
+      const isMatch = targetArea
+        ? (h.areaId === targetArea.id || (h.areaCode === targetArea.code && (h.communeId === targetArea.communeId || (h as any).communeCode === targetArea.communeCode)))
+        : (h.areaId === areaIdOrCode || h.areaCode === areaIdOrCode);
+      if (isMatch) {
         return {
           ...h,
           assignedSurveyorId: targetSurveyor.id,
@@ -2884,9 +2977,22 @@ export default function App() {
     setHouseholds(updatedHouseholds);
     try { localStorage.setItem('cached_households', JSON.stringify(updatedHouseholds)); } catch (e) {}
 
+    // Cập nhật assignedAreas của Điều tra viên (loại bỏ 001 nếu có)
+    const areaIdToAssign = targetArea ? targetArea.id : areaIdOrCode;
+    const prevAssigned = targetSurveyor.assignedAreas || [];
+    const cleanedAssigned = Array.from(new Set([...prevAssigned.filter(item => item !== '001'), areaIdToAssign]));
+    const updatedSurveyor: Surveyor = {
+      ...targetSurveyor,
+      assignedAreas: cleanedAssigned,
+      updatedAt: new Date().toISOString()
+    };
+    await handleSaveSurveyor(updatedSurveyor);
+
     // Batch update Firestore
     try {
-      const matching = updatedHouseholds.filter(h => h.areaCode === areaCode);
+      const matching = updatedHouseholds.filter(h => targetArea
+        ? (h.areaId === targetArea.id || (h.areaCode === targetArea.code && (h.communeId === targetArea.communeId || (h as any).communeCode === targetArea.communeCode)))
+        : (h.areaId === areaIdOrCode || h.areaCode === areaIdOrCode));
       for (let i = 0; i < matching.length; i += 300) {
         const chunk = matching.slice(i, i + 300);
         const batch = writeBatch(db);
@@ -3434,13 +3540,66 @@ export default function App() {
     }
   };
 
+  // Xóa trắng (reset) phiếu điều tra của 1 hộ đơn lẻ
+  const handleResetSingleHousehold = async (targetH: Household) => {
+    if (!window.confirm(`Bạn có chắc chắn muốn xóa trắng phiếu của hộ "${targetH.householdHead}" (đưa về trạng thái chưa nhập ban đầu) không?`)) {
+      return;
+    }
+    const updatedH: Household = {
+      ...targetH,
+      surveyStatus: 'CHUA_NHAP',
+      questionnaire: createDefaultQuestionnaire(),
+      updatedBy: currentUser.name,
+      updatedAt: new Date().toISOString()
+    };
+    setHouseholds(prev => {
+      const next = prev.map(item => item.id === targetH.id ? updatedH : item);
+      try { localStorage.setItem('cached_households', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+    showNotification('success', `Đã xóa trắng thành công phiếu của hộ "${targetH.householdHead}".`);
+    try {
+      await setDoc(doc(db, 'households', targetH.id), {
+        surveyStatus: 'CHUA_NHAP',
+        questionnaire: createDefaultQuestionnaire(),
+        updatedBy: currentUser.name,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (e) {
+      console.warn("Reset single household error:", e);
+    }
+  };
+
   const handleResetQuestionnaires = async () => {
     setIsResettingQuestionnaire(true);
     let targetIds: string[] = [];
-    if (resetTargetType === 'area') {
+
+    if (resetTargetType === 'all_system_surveyed') {
+      targetIds = households.filter(h => isHouseholdSurveyed(h) || h.surveyStatus !== 'CHUA_NHAP').map(h => h.id);
+      if (targetIds.length === 0) {
+        targetIds = households.filter(h => h.questionnaire && (
+          h.questionnaire.muc1_has || h.questionnaire.muc2_has || h.questionnaire.muc3_has ||
+          h.questionnaire.muc4_has || h.questionnaire.muc5_has || h.questionnaire.muc6_has || h.questionnaire.muc7_has
+        )).map(h => h.id);
+      }
+    } else if (resetTargetType === 'commune_surveyed') {
+      const targetCommune = communes.find(c => c.id === selectedCommuneId || c.communeCode === selectedCommuneId);
+      targetIds = households.filter(h => {
+        const matchComm = h.communeId === selectedCommuneId || (targetCommune && (h.communeCode === targetCommune.communeCode || h.communeId === targetCommune.id));
+        return matchComm && (isHouseholdSurveyed(h) || h.surveyStatus !== 'CHUA_NHAP');
+      }).map(h => h.id);
+    } else if (resetTargetType === 'area') {
+      const targetCommune = communes.find(c => c.id === resetCommuneId || c.communeCode === resetCommuneId);
+      const targetArea = areas.find(a => a.id === resetAreaId || a.code === resetAreaId);
       const matching = households.filter(h => {
-        if (resetCommuneId !== 'ALL' && h.communeId !== resetCommuneId) return false;
-        if (resetAreaId !== 'ALL' && h.areaId !== resetAreaId && h.areaCode !== resetAreaId) return false;
+        if (resetCommuneId !== 'ALL') {
+          const matchComm = h.communeId === resetCommuneId || (targetCommune && (h.communeCode === targetCommune.communeCode || h.communeId === targetCommune.id));
+          if (!matchComm) return false;
+        }
+        if (resetAreaId !== 'ALL') {
+          const matchArea = h.areaId === resetAreaId || h.areaCode === resetAreaId || (targetArea && (h.areaCode === targetArea.code || h.areaName === targetArea.name));
+          if (!matchArea) return false;
+        }
         return true;
       });
       targetIds = matching.map(h => h.id);
@@ -3482,12 +3641,12 @@ export default function App() {
         for (let i = 0; i < chunked.length; i += 300) {
           const batch = writeBatch(db);
           chunked.slice(i, i + 300).forEach(h => {
-            batch.update(doc(db, 'households', h.id), {
+            batch.set(doc(db, 'households', h.id), {
               surveyStatus: 'CHUA_NHAP',
               questionnaire: createDefaultQuestionnaire(),
               updatedBy: currentUser.name,
               updatedAt: new Date().toISOString()
-            });
+            }, { merge: true });
           });
           await batch.commit();
         }
@@ -3906,12 +4065,14 @@ export default function App() {
                   (h.areaCode && a.code === h.areaCode)
                 );
                 const areaCodeDisplay = h.areaCode || matchedArea?.code || '001';
-                // Tên địa bàn: ưu tiên tên đã lưu hoặc tên sheet (nếu có), kế tiếp tên địa bàn khớp trong danh mục, nếu trống dùng Địa bàn [mã]
-                const areaNameDisplay = (h.areaName && h.areaName.trim() && h.areaName !== 'Địa bàn') 
-                  ? h.areaName.trim() 
-                  : ((h as any).sheetName && (h as any).sheetName.trim() && (h as any).sheetName !== 'Địa bàn')
+                // Tên địa bàn: ưu tiên tên sheet gốc từ bảng kê, kế tiếp tên đã lưu, kế tiếp tên địa bàn khớp trong danh mục, loại bỏ 001
+                const areaNameDisplay = ((h as any).sheetName && (h as any).sheetName.trim() && (h as any).sheetName !== '001' && (h as any).sheetName !== 'Địa bàn')
                   ? (h as any).sheetName.trim()
-                  : (matchedArea?.name && matchedArea.name.trim() && matchedArea.name !== 'Địa bàn')
+                  : (h.areaName && h.areaName.trim() && h.areaName !== '001' && h.areaName !== 'Địa bàn' && h.areaName !== h.areaCode && !h.areaName.startsWith('Địa bàn 001')) 
+                  ? h.areaName.trim() 
+                  : (matchedArea?.name && matchedArea.name.trim() && matchedArea.name !== '001' && matchedArea.name !== matchedArea.code && matchedArea.name !== 'Địa bàn' && !matchedArea.name.startsWith('Địa bàn 001'))
+                  ? matchedArea.name.trim()
+                  : (matchedArea?.name && matchedArea.name.trim() && matchedArea.name !== '001' && !matchedArea.name.startsWith('Địa bàn 001'))
                   ? matchedArea.name.trim()
                   : (h.areaCode ? `Địa bàn ${h.areaCode}` : '---');
                 const isRowSelected = selectedHouseholdIds.includes(h.id);
@@ -4013,6 +4174,17 @@ export default function App() {
                             aria-label="Thay hộ mẫu"
                           >
                             <RefreshCw className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Nút Xóa trắng / Reset phiếu của riêng hộ này */}
+                          <button
+                            type="button"
+                            onClick={() => handleResetSingleHousehold(h)}
+                            className="p-1.5 text-amber-700 hover:text-amber-900 bg-amber-50 hover:bg-amber-100 rounded border border-amber-300 cursor-pointer shadow-2xs hover:scale-105 transition-all"
+                            title={`Xóa trắng (reset) phiếu của hộ "${h.householdHead}" về trạng thái ban đầu`}
+                            aria-label="Xóa trắng phiếu hộ này"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
                           </button>
 
                           {/* Duyệt & Khóa phiếu: biểu tượng kèm tooltip hover */}
@@ -4471,6 +4643,18 @@ export default function App() {
           )}
 
           <button 
+            onClick={() => setActiveTab('surveyor_progress')}
+            className={`px-3.5 py-2 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap rounded-t-md font-bold ${
+              activeTab === 'surveyor_progress' 
+                ? 'bg-white text-teal-950 shadow-md border-t-2 border-x border-slate-300 border-t-amber-500 font-black' 
+                : 'text-white hover:bg-teal-700/80 border-transparent'
+            }`}
+          >
+            <UserCheck className={`w-4 h-4 ${activeTab === 'surveyor_progress' ? 'text-teal-800' : 'text-emerald-300'}`} />
+            <span className={activeTab === 'surveyor_progress' ? 'text-teal-950 font-black' : 'text-white'}>3. Tiến độ ĐTV</span>
+          </button>
+
+          <button 
             onClick={() => setActiveTab('tnh')}
             className={`px-3.5 py-2 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap rounded-t-md font-bold ${
               activeTab === 'tnh' 
@@ -4479,7 +4663,7 @@ export default function App() {
             }`}
           >
             <BarChart3 className={`w-4 h-4 ${activeTab === 'tnh' ? 'text-teal-800' : 'text-teal-100'}`} />
-            <span className={activeTab === 'tnh' ? 'text-teal-950 font-black' : 'text-white'}>3. Tổng hợp nhanh</span>
+            <span className={activeTab === 'tnh' ? 'text-teal-950 font-black' : 'text-white'}>4. Tổng hợp nhanh</span>
           </button>
 
           {currentUser.role === 'ADMIN' && (
@@ -4492,7 +4676,7 @@ export default function App() {
               }`}
             >
               <TrendingUp className={`w-4 h-4 ${activeTab === 'macro_control' ? 'text-teal-800' : 'text-amber-300'}`} />
-              <span className={activeTab === 'macro_control' ? 'text-teal-950 font-black' : 'text-white'}>4. Kiểm soát TNBQ</span>
+              <span className={activeTab === 'macro_control' ? 'text-teal-950 font-black' : 'text-white'}>5. Kiểm soát TNBQ</span>
             </button>
           )}
 
@@ -4506,7 +4690,7 @@ export default function App() {
               }`}
             >
               <Database className={`w-4 h-4 ${activeTab === 'database' ? 'text-teal-800' : 'text-teal-100'}`} />
-              <span className={activeTab === 'database' ? 'text-teal-950 font-black' : 'text-white'}>5. Quản lý danh mục xã</span>
+              <span className={activeTab === 'database' ? 'text-teal-950 font-black' : 'text-white'}>6. Quản lý danh mục xã</span>
             </button>
           )}
 
@@ -4519,7 +4703,7 @@ export default function App() {
             }`}
           >
             <BookOpen className={`w-4 h-4 ${activeTab === 'catalog' ? 'text-teal-800' : 'text-amber-200'}`} />
-            <span className={activeTab === 'catalog' ? 'text-teal-950 font-black' : 'text-white'}>6. Danh mục tra cứu</span>
+            <span className={activeTab === 'catalog' ? 'text-teal-950 font-black' : 'text-white'}>7. Danh mục tra cứu</span>
           </button>
 
           {(currentUser.role === 'ADMIN' || currentUser.role === 'SUPERVISOR') && (
@@ -4532,7 +4716,7 @@ export default function App() {
               }`}
             >
               <Building2 className={`w-4 h-4 ${activeTab === 'surveyors' ? 'text-teal-800' : 'text-emerald-200'}`} />
-              <span className={activeTab === 'surveyors' ? 'text-teal-950 font-black' : 'text-white'}>7. Hệ thống</span>
+              <span className={activeTab === 'surveyors' ? 'text-teal-950 font-black' : 'text-white'}>8. Hệ thống</span>
             </button>
           )}
         </nav>
@@ -5147,7 +5331,22 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 3: TỔNG HỢP NHANH (TNH) */}
+        {/* TAB 3: TIẾN ĐỘ NHẬP TIN THEO TỪNG ĐIỀU TRA VIÊN ĐÃ PHÂN CÔNG */}
+        {activeTab === 'surveyor_progress' && (
+          <SurveyorProgressView
+            surveyors={surveyors}
+            households={households}
+            areas={areas}
+            communes={communes}
+            currentUser={currentUser}
+            onOpenHouseholdForm={(hh) => {
+              setActiveHouseholdForm(hh);
+            }}
+            showNotification={showNotification}
+          />
+        )}
+
+        {/* TAB 4: TỔNG HỢP NHANH (TNH) */}
         {activeTab === 'tnh' && (
           <div className="bg-white rounded border border-slate-300 shadow-sm flex flex-col gap-4 p-4 md:p-5">
             {/* Header gọn gàng với nút Xuất Excel & Thông tin phạm vi */}
@@ -5174,252 +5373,7 @@ export default function App() {
               </div>
             </div>
 
-            {/* SURVEYOR PERSONAL PROGRESS SUMMARY BANNER & BREAKDOWN BY COMMUNE AND AREA */}
-            {currentUser?.role === 'SUPERVISOR' && (
-              <div className="bg-gradient-to-br from-amber-950 via-slate-900 to-amber-950 rounded-lg p-4 text-white shadow-md border border-amber-700/60 flex flex-col gap-3">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-amber-700/40 pb-3">
-                  <div className="flex items-center gap-2.5">
-                    <span className="px-2.5 py-1 rounded bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider shadow-2xs">
-                      TIẾN ĐỘ GIÁM SÁT XÃ PHỤ TRÁCH
-                    </span>
-                    <h3 className="font-black text-sm md:text-base text-white flex items-center gap-2">
-                      <ShieldCheck className="w-4 h-4 text-amber-300 animate-pulse" />
-                      <span>{currentUser.name} ({currentUser.code}) - {currentUser.department}</span>
-                    </h3>
-                  </div>
-                  <div className="text-xs text-amber-200 font-bold">
-                    Quyền giám sát: {currentUser.assignedCommunes?.includes('ALL') || !currentUser.assignedCommunes || currentUser.assignedCommunes.length === 0 ? 'Toàn bộ các xã' : `Phụ trách ${currentUser.assignedCommunes.length} xã`}
-                  </div>
-                </div>
 
-                {(() => {
-                  // Gather all households belonging to communes supervised by this supervisor
-                  const supervisedHHs = households.filter(h => {
-                    if (!currentUser.assignedCommunes || currentUser.assignedCommunes.includes('ALL') || currentUser.assignedCommunes.length === 0) return true;
-                    return currentUser.assignedCommunes.includes(h.communeId) || (Boolean(h.communeCode) && currentUser.assignedCommunes.includes(h.communeCode));
-                  });
-                  const totalAssigned = supervisedHHs.length;
-                  const totalSurveyed = supervisedHHs.filter(h => h.surveyStatus === 'DA_HOAN_THANH' || h.surveyStatus === 'DA_DUYET').length;
-                  const totalRemaining = Math.max(0, totalAssigned - totalSurveyed);
-                  
-                  // Calculate member and income details of supervised households
-                  let totalMembers = 0;
-                  let totalIncome = 0;
-                  supervisedHHs.forEach(h => {
-                    if (h.surveyStatus === 'DA_HOAN_THANH' || h.surveyStatus === 'DA_DUYET') {
-                      const inc = calculateHouseholdTotalIncome(h);
-                      totalIncome += inc.total;
-                      if (h.questionnaire?.muc1_rows) {
-                        totalMembers += h.questionnaire.muc1_rows.length;
-                      }
-                    }
-                  });
-                  
-                  const overallTnbq = totalMembers > 0 ? Math.round(totalIncome / totalMembers / 12) : 0;
-                  const overallPercent = totalAssigned > 0 ? Math.round((totalSurveyed / totalAssigned) * 100) : 0;
-
-                  return (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
-                        <span className="text-amber-200 block text-[11px]">Tổng số hộ thuộc các xã giám sát:</span>
-                        <strong className="text-lg font-black text-white">{totalAssigned} hộ</strong>
-                        <span className="block text-[10px] text-amber-300 mt-0.5">({Array.from(new Set(supervisedHHs.map(h => h.communeCode))).length} xã có dữ liệu)</span>
-                      </div>
-                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
-                        <span className="text-emerald-200 block text-[11px]">Đã khảo sát / Đã duyệt:</span>
-                        <strong className="text-lg font-black text-emerald-300">{totalSurveyed} / {totalAssigned} hộ ({overallPercent}%)</strong>
-                        <span className="block text-[10px] text-emerald-300 mt-0.5">Còn lại cần rà soát: {totalRemaining} hộ</span>
-                      </div>
-                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
-                        <span className="text-sky-200 block text-[11px]">Nhân khẩu đã nhập tin:</span>
-                        <strong className="text-lg font-black text-sky-200">{totalMembers} người</strong>
-                        <span className="block text-[10px] text-sky-300 mt-0.5">Thu nhập tích lũy: {totalIncome.toLocaleString()} (1000đ)</span>
-                      </div>
-                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
-                        <label className="text-amber-200 block text-[11px] font-bold mb-1">Ghi chú của giám sát viên:</label>
-                        <textarea
-                          className="w-full bg-white/5 border border-white/20 rounded p-1.5 text-white text-xs"
-                          rows={3}
-                          placeholder="Nhập ghi chú hoặc nhận xét tại đây..."
-                        />
-                      </div>
-                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
-                        <span className="text-amber-200 block text-[11px]">TNBQ bình quân tháng:</span>
-                        <strong className="text-lg font-black text-amber-300">{overallTnbq > 0 ? `${overallTnbq.toLocaleString()} đ` : '0 đ'}</strong>
-                        <span className="block text-[10px] text-amber-200 mt-0.5">đ/người/tháng</span>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            )}
-
-            {/* SURVEYOR PERSONAL PROGRESS SUMMARY BANNER & BREAKDOWN BY COMMUNE AND AREA */}
-            {(currentUser?.role === 'SURVEYOR' || currentUser?.role === 'ADMIN') && surveyorAssignedAreasSummary.length > 0 && (
-              <div className="bg-gradient-to-br from-slate-900 via-teal-950 to-slate-900 rounded-lg p-4 text-white shadow-md border border-teal-700/70 flex flex-col gap-3">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-teal-700/60 pb-3">
-                  <div className="flex items-center gap-2.5">
-                    <span className="px-2.5 py-1 rounded bg-amber-400 text-slate-950 font-black text-xs uppercase tracking-wider shadow-2xs">
-                      {currentUser?.role === 'SURVEYOR' ? 'TIẾN ĐỘ CỦA BẠN' : 'THEO DÕI TIẾN ĐỘ ĐỊA BÀN'}
-                    </span>
-                    <h3 className="font-black text-sm md:text-base text-white flex items-center gap-2">
-                      <Users className="w-4 h-4 text-amber-300" />
-                      <span>{currentUser.name} ({currentUser.code})</span>
-                    </h3>
-                  </div>
-
-                  <div className="flex items-center gap-3">
-                    <label className="flex items-center gap-2 cursor-pointer bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded border border-white/20 transition-colors text-xs font-bold text-amber-200">
-                      <input 
-                        type="checkbox"
-                        checked={tnhSurveyorOnlyMine}
-                        onChange={(e) => setTnhSurveyorOnlyMine(e.target.checked)}
-                        className="rounded text-teal-500 w-4 h-4 cursor-pointer"
-                      />
-                      <span>Chỉ tổng hợp các địa bàn & xã tôi phụ trách</span>
-                    </label>
-                  </div>
-                </div>
-
-                {/* 4 KPI Cards */}
-                {(() => {
-                  const totalAssigned = surveyorAssignedAreasSummary.reduce((acc, a) => acc + a.totalAssigned, 0);
-                  const totalSurveyed = surveyorAssignedAreasSummary.reduce((acc, a) => acc + a.surveyedCount, 0);
-                  const totalRemaining = Math.max(0, totalAssigned - totalSurveyed);
-                  const totalMembers = surveyorAssignedAreasSummary.reduce((acc, a) => acc + a.totalMembers, 0);
-                  const totalIncome = surveyorAssignedAreasSummary.reduce((acc, a) => acc + a.totalIncome, 0);
-                  const overallTnbq = totalMembers > 0 ? Math.round(totalIncome / totalMembers / 12) : 0;
-                  const overallPercent = totalAssigned > 0 ? Math.round((totalSurveyed / totalAssigned) * 100) : 0;
-
-                  return (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
-                        <span className="text-teal-200 block text-[11px]">Tổng số hộ phụ trách:</span>
-                        <strong className="text-lg font-black text-white">{totalAssigned} hộ</strong>
-                        <span className="block text-[10px] text-teal-300 mt-0.5">({surveyorAssignedAreasSummary.length} địa bàn)</span>
-                      </div>
-                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
-                        <span className="text-emerald-200 block text-[11px]">Đã điều tra xong:</span>
-                        <strong className="text-lg font-black text-emerald-300">{totalSurveyed} / {totalAssigned} hộ ({overallPercent}%)</strong>
-                        <span className="block text-[10px] text-emerald-300 mt-0.5">Còn lại: {totalRemaining} hộ</span>
-                      </div>
-                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
-                        <span className="text-sky-200 block text-[11px]">Tổng nhân khẩu điều tra:</span>
-                        <strong className="text-lg font-black text-sky-200">{totalMembers} người</strong>
-                        <span className="block text-[10px] text-sky-300 mt-0.5">Tổng TN: {totalIncome.toLocaleString()} (1000đ)</span>
-                      </div>
-                      <div className="bg-white/10 rounded p-2.5 border border-white/10">
-                        <span className="text-amber-200 block text-[11px]">TNBQ bình quân tháng:</span>
-                        <strong className="text-lg font-black text-amber-300">{overallTnbq > 0 ? `${overallTnbq.toLocaleString()} đ` : '0 đ'}</strong>
-                        <span className="block text-[10px] text-amber-200 mt-0.5">đ/người/tháng</span>
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* BẢNG TỔNG HỢP THEO ĐỊA BÀN VÀ XÃ PHỤ TRÁCH */}
-                <div className="bg-white text-slate-900 rounded border border-teal-600/50 overflow-hidden shadow-xs mt-1">
-                  <div className="bg-teal-900 text-white px-3 py-2 flex items-center justify-between border-b border-teal-800 text-xs">
-                    <span className="font-bold flex items-center gap-1.5 uppercase">
-                      <Layers className="w-3.5 h-3.5 text-amber-300" />
-                      <span>Bảng tổng hợp chi tiết theo từng địa bàn và xã bạn phụ trách</span>
-                    </span>
-                    <span className="text-xs text-teal-200">
-                      Gồm <strong>{surveyorAssignedAreasSummary.length}</strong> địa bàn
-                    </span>
-                  </div>
-
-                  <div className="overflow-x-auto max-h-[260px] overflow-y-auto">
-                    <table className="w-full border-collapse text-xs whitespace-nowrap text-left">
-                      <thead className="sticky top-0 bg-slate-100 text-slate-800 font-bold border-b border-slate-300 text-[11px]">
-                        <tr>
-                          <th className="p-2 text-center w-10 border border-slate-300">STT</th>
-                          <th className="p-2 border border-slate-300">Xã / Phường</th>
-                          <th className="p-2 border border-slate-300">Địa bàn điều tra</th>
-                          <th className="p-2 text-center border border-slate-300 w-16">Chỉ tiêu</th>
-                          <th className="p-2 text-center border border-slate-300 w-16">Đã làm</th>
-                          <th className="p-2 text-center border border-slate-300 w-16">Còn lại</th>
-                          <th className="p-2 text-center border border-slate-300 min-w-[130px]">Tiến độ</th>
-                          <th className="p-2 text-center border border-slate-300">Nhân khẩu</th>
-                          <th className="p-2 text-right border border-slate-300">Tổng TN (1000đ)</th>
-                          <th className="p-2 text-right border border-slate-300">TNBQ/tháng</th>
-                          <th className="p-2 text-center border border-slate-300">Thao tác</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {surveyorAssignedAreasSummary.map((item, idx) => {
-                          const isDone = item.totalAssigned > 0 && item.surveyedCount >= item.totalAssigned;
-                          return (
-                            <tr key={item.key} className="odd:bg-white even:bg-[#f2fafb] hover:bg-[#e6f6f8] border-b border-slate-200 transition-colors">
-                              <td className="p-2 text-center text-slate-600 border border-slate-300">{idx + 1}</td>
-                              <td className="p-2 font-bold text-slate-900 border border-slate-300">
-                                [{item.communeCode}] {item.communeName}
-                              </td>
-                              <td className="p-2 border border-slate-300">
-                                <span className="font-semibold text-slate-800">ĐB {item.areaCode}</span>
-                                <span className="text-slate-500 ml-1">({item.areaName})</span>
-                              </td>
-                              <td className="p-2 text-center font-bold text-slate-800 border border-slate-300">{item.totalAssigned}</td>
-                              <td className="p-2 text-center font-bold text-slate-800 border border-slate-300">{item.surveyedCount}</td>
-                              <td className="p-2 text-center font-bold text-slate-800 border border-slate-300">{item.remainingCount}</td>
-                              <td className="p-2 text-center border border-slate-300">
-                                <div className="flex items-center gap-1.5">
-                                  <div className="flex-1 bg-slate-200 rounded-full h-2 overflow-hidden">
-                                    <div 
-                                      className={`h-full rounded-full transition-all ${isDone ? 'bg-emerald-600' : item.percentDone > 50 ? 'bg-teal-600' : 'bg-amber-500'}`}
-                                      style={{ width: `${Math.min(100, item.percentDone)}%` }}
-                                    />
-                                  </div>
-                                  <span className={`text-[10px] font-bold w-9 text-right ${isDone ? 'text-emerald-700' : 'text-slate-700'}`}>
-                                    {item.percentDone}%
-                                  </span>
-                                </div>
-                              </td>
-                              <td className="p-2 text-center text-slate-800 border border-slate-300">{item.totalMembers} ng</td>
-                              <td className="p-2 text-right text-slate-800 border border-slate-300">{item.totalIncome.toLocaleString()}</td>
-                              <td className="p-2 text-right font-bold text-slate-900 border border-slate-300">
-                                {item.perCapitaMonth > 0 ? `${item.perCapitaMonth.toLocaleString()} đ` : '---'}
-                              </td>
-                              <td className="p-2 text-center border border-slate-300">
-                                <div className="flex items-center justify-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setTnhScopeMode('COMMUNE_SECTOR');
-                                      setTnhSelectedCommuneId(item.communeId);
-                                      setSelectedCommuneId(item.communeId);
-                                      setSelectedAreaId(item.areaId || item.areaCode);
-                                      showNotification('success', `Đã liên kết Bảng 2 theo địa bàn [${item.areaCode}] xã [${item.communeName}]`);
-                                    }}
-                                    className="px-2 py-0.5 bg-sky-700 hover:bg-sky-600 text-white rounded text-[11px] font-bold cursor-pointer transition-colors shadow-2xs"
-                                    title="Xem tổng hợp suy rộng của địa bàn này ở Bảng 2"
-                                  >
-                                    Xem Bảng 2
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedCommuneId(item.communeId);
-                                      setSelectedAreaId(item.areaId || item.areaCode);
-                                      setActiveTab('entry');
-                                      showNotification('success', `Đã chuyển đến Nhập tin cho địa bàn [${item.areaCode}]`);
-                                    }}
-                                    className="px-2 py-0.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded text-[11px] font-bold cursor-pointer transition-colors shadow-2xs"
-                                    title="Chuyển sang Tab 2 để nhập tin phiếu hộ cho địa bàn này"
-                                  >
-                                    Nhập tin
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* BẢNG 1: DANH MỤC XÃ & CHỈ TIÊU MẪU ĐIỀU TRA (19 CỘT THEO QUY CHUẨN) */}
             <div className="bg-white border border-slate-300 rounded-lg shadow-sm overflow-hidden flex flex-col">
@@ -5769,111 +5723,9 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Table Body */}
-              <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
-                {!tnhPivotMode ? (
-                  <table className="w-full border-collapse text-xs text-slate-800 whitespace-nowrap">
-                    <thead>
-                      <tr className="bg-[#058da0] text-white text-center font-bold text-[11px]">
-                        <th className="border border-[#047484] p-2.5 w-12 bg-[#058da0]">STT</th>
-                        <th className="border border-[#047484] p-2.5 w-16 bg-[#058da0]">Mã loại</th>
-                        <th className="border border-[#047484] p-2.5 text-left min-w-[200px] bg-[#058da0]">Tên nhóm ngành nguồn thu lớn nhất</th>
-                        <th className="border border-[#047484] p-2.5 w-32 bg-[#047484] text-amber-200">
-                          Tổng số hộ trong bảng kê
-                        </th>
-                        <th className="border border-[#047484] p-2.5 w-28 bg-[#047484] text-cyan-100">
-                          Tỷ trọng cơ cấu %
-                        </th>
-                        <th className="border border-[#047484] p-2.5 w-32 bg-[#047484] text-emerald-200">
-                          Chỉ tiêu phân bổ mẫu chính thức
-                        </th>
-                        <th className="border border-[#047484] p-2.5 w-28 bg-[#058da0] text-white">
-                          Hộ điều tra thực tế
-                        </th>
-                        <th className="border border-[#047484] p-2.5 w-40 bg-[#035b69] text-emerald-100">
-                          TNBQ đầu người/tháng theo loại hộ (1.000 đ)
-                        </th>
-                        <th className="border border-[#047484] p-2.5 w-44 bg-[#02444e] text-amber-300 font-black">
-                          Suy rộng TNBQ (1.000 đ)
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tnhSummary.sectorData.map((s, idx) => (
-                        <tr key={s.code} className="odd:bg-white even:bg-[#f2fafb] hover:bg-[#e6f6f8] transition-colors">
-                          <td className="border border-slate-300 p-2.5 text-center text-slate-500">{idx + 1}</td>
-                          <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">{s.code}</td>
-                          <td className="border border-slate-300 p-2.5 font-bold text-slate-800">{s.name}</td>
-                          
-                          {/* 1. Tổng số hộ */}
-                          <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">
-                            {s.bkCount.toLocaleString()}
-                          </td>
-
-                          {/* 2. Tỷ trọng cơ cấu */}
-                          <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">
-                            {s.percent}%
-                          </td>
-
-                          {/* 3. Mẫu chính thức phân bổ */}
-                          <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">
-                            {s.mauAlloc}
-                          </td>
-
-                          {/* Số hộ điều tra thực tế */}
-                          <td className="border border-slate-300 p-2.5 text-center text-slate-800 font-medium">
-                            {s.surveyCount > 0 ? (
-                              <span>{s.surveyCount} hộ ({s.groupMembers} ng)</span>
-                            ) : (
-                              <span className="text-slate-400 italic">Chưa nạp</span>
-                            )}
-                          </td>
-
-                          {/* TNBQ đầu người/tháng theo loại hộ */}
-                          <td className="border border-slate-300 p-2.5 text-right font-bold text-slate-900">
-                            {s.perCapitaMonth > 0 ? `${s.perCapitaMonth.toLocaleString()} đ` : '0 đ'}
-                          </td>
-
-                          {/* 4. Suy rộng TNBQ = Tỉ trọng cơ cấu * TNBQ đầu người/tháng theo loại hộ */}
-                          <td className="border border-slate-300 p-2.5 text-right font-black text-slate-900 text-sm">
-                            {s.extrapolatedIncomeYear > 0 ? `${s.extrapolatedIncomeYear.toLocaleString()} đ` : '0 đ'}
-                          </td>
-                        </tr>
-                      ))}
-
-                      {/* Dòng TỔNG TOÀN XÃ / TOÀN TKCS */}
-                      <tr className="bg-sky-100 font-black text-slate-900 border-t-2 border-sky-800">
-                        <td className="border border-slate-300 p-3 text-center" colSpan={3}>
-                          <div className="flex items-center justify-between">
-                            <span className="uppercase text-sky-950">TỔNG TOÀN BỘ PHẠM VI ĐANG XEM</span>
-                            <span className="text-xs bg-sky-800 text-white px-2 py-0.5 rounded font-bold">
-                              {tnhScopeCommunes.length} Xã
-                            </span>
-                          </div>
-                        </td>
-                        <td className="border border-slate-300 p-3 text-center text-slate-950 text-sm font-black bg-amber-100/60">
-                          {tnhSummary.totalBkHH.toLocaleString()}
-                        </td>
-                        <td className="border border-slate-300 p-3 text-center text-cyan-950 font-black bg-cyan-100/60">
-                          100.0%
-                        </td>
-                        <td className="border border-slate-300 p-3 text-center text-emerald-950 text-sm font-black bg-emerald-100/60">
-                          {tnhSummary.totalAllocMau.toLocaleString()}
-                        </td>
-                        <td className="border border-slate-300 p-3 text-center text-slate-900 font-black">
-                          {tnhSummary.totalSurveyedHH} / {tnhSummary.totalHH} hộ ({tnhSummary.totalMembers} ng)
-                        </td>
-                        <td className="border border-slate-300 p-3 text-right text-emerald-950 font-black bg-emerald-100/40" title={`${tnhSummary.totalMembers} nhân khẩu thực tế điều tra`}>
-                          {tnhSummary.overallDirectPerCapita.toLocaleString()} đ
-                        </td>
-                        <td className="border border-slate-300 p-3 text-right text-rose-950 text-base font-black bg-amber-200/80 shadow-inner">
-                          {tnhSummary.overallExtrapolated.toLocaleString()} đ
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                ) : (
-                  /* PIVOT TABLE VIEW: ROWS ARE COMMUNES, COLUMNS ARE SECTORS & INCOME INDICATORS */
+              {/* Table Body / Pivot or 2-Column Split View */}
+              {tnhPivotMode ? (
+                <div className="overflow-x-auto max-h-[500px] overflow-y-auto p-4">
                   <table className="w-full border-collapse text-xs text-slate-800 whitespace-nowrap">
                     <thead>
                       <tr className="bg-[#058da0] text-white text-center font-bold text-[11px]">
@@ -5943,8 +5795,170 @@ export default function App() {
                       })}
                     </tbody>
                   </table>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 p-4 items-start">
+                  {/* Left: Summary Table */}
+                  <div className="lg:col-span-7 overflow-x-auto max-h-[500px] overflow-y-auto border border-slate-300 rounded-lg shadow-inner bg-white">
+                    <table className="w-full border-collapse text-xs text-slate-800 whitespace-nowrap">
+                      <thead>
+                        <tr className="bg-[#058da0] text-white text-center font-bold text-[11px]">
+                          <th className="border border-[#047484] p-2.5 w-12 bg-[#058da0]">STT</th>
+                          <th className="border border-[#047484] p-2.5 w-16 bg-[#058da0]">Mã loại</th>
+                          <th className="border border-[#047484] p-2.5 text-left min-w-[200px] bg-[#058da0]">Tên nhóm ngành nguồn thu lớn nhất</th>
+                          <th className="border border-[#047484] p-2.5 w-32 bg-[#047484] text-amber-200">
+                            Tổng số hộ trong bảng kê
+                          </th>
+                          <th className="border border-[#047484] p-2.5 w-28 bg-[#047484] text-cyan-100">
+                            Tỷ trọng cơ cấu %
+                          </th>
+                          <th className="border border-[#047484] p-2.5 w-32 bg-[#047484] text-emerald-200">
+                            Chỉ tiêu phân bổ mẫu chính thức
+                          </th>
+                          <th className="border border-[#047484] p-2.5 w-28 bg-[#058da0] text-white">
+                            Hộ điều tra thực tế
+                          </th>
+                          <th className="border border-[#047484] p-2.5 w-40 bg-[#035b69] text-emerald-100">
+                            TNBQ đầu người/tháng theo loại hộ (1.000 đ)
+                          </th>
+                          <th className="border border-[#047484] p-2.5 w-44 bg-[#02444e] text-amber-300 font-black">
+                            Suy rộng TNBQ (1.000 đ)
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tnhSummary.sectorData.map((s, idx) => (
+                          <tr key={s.code} className="odd:bg-white even:bg-[#f2fafb] hover:bg-[#e6f6f8] transition-colors">
+                            <td className="border border-slate-300 p-2.5 text-center text-slate-500">{idx + 1}</td>
+                            <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">{s.code}</td>
+                            <td className="border border-slate-300 p-2.5 font-bold text-slate-800">{s.name}</td>
+                            
+                            {/* 1. Tổng số hộ */}
+                            <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">
+                              {s.bkCount.toLocaleString()}
+                            </td>
+
+                            {/* 2. Tỷ trọng cơ cấu */}
+                            <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">
+                              {s.percent}%
+                            </td>
+
+                            {/* 3. Mẫu chính thức phân bổ */}
+                            <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">
+                              {s.mauAlloc}
+                            </td>
+
+                            {/* Số hộ điều tra thực tế */}
+                            <td className="border border-slate-300 p-2.5 text-center text-slate-800 font-medium">
+                              {s.surveyCount > 0 ? (
+                                <span>{s.surveyCount} hộ ({s.groupMembers} ng)</span>
+                              ) : (
+                                <span className="text-slate-400 italic">Chưa nạp</span>
+                              )}
+                            </td>
+
+                            {/* TNBQ đầu người/tháng theo loại hộ */}
+                            <td className="border border-slate-300 p-2.5 text-right font-bold text-slate-900">
+                              {s.perCapitaMonth > 0 ? `${s.perCapitaMonth.toLocaleString()} đ` : '0 đ'}
+                            </td>
+
+                            {/* 4. Suy rộng TNBQ = Tỉ trọng cơ cấu * TNBQ đầu người/tháng theo loại hộ */}
+                            <td className="border border-slate-300 p-2.5 text-right font-black text-slate-900 text-sm">
+                              {s.extrapolatedIncomeYear > 0 ? `${s.extrapolatedIncomeYear.toLocaleString()} đ` : '0 đ'}
+                            </td>
+                          </tr>
+                        ))}
+
+                        {/* Dòng TỔNG TOÀN XÃ / TOÀN TKCS */}
+                        <tr className="bg-sky-100 font-black text-slate-900 border-t-2 border-sky-800">
+                          <td className="border border-slate-300 p-3 text-center" colSpan={3}>
+                            <div className="flex items-center justify-between">
+                              <span className="uppercase text-sky-950">TỔNG TOÀN BỘ PHẠM VI ĐANG XEM</span>
+                              <span className="text-xs bg-sky-800 text-white px-2 py-0.5 rounded font-bold">
+                                {tnhScopeCommunes.length} Xã
+                              </span>
+                            </div>
+                          </td>
+                          <td className="border border-slate-300 p-3 text-center text-slate-950 text-sm font-black bg-amber-100/60">
+                            {tnhSummary.totalBkHH.toLocaleString()}
+                          </td>
+                          <td className="border border-slate-300 p-3 text-center text-cyan-950 font-black bg-cyan-100/60">
+                            100.0%
+                          </td>
+                          <td className="border border-slate-300 p-3 text-center text-emerald-950 text-sm font-black bg-emerald-100/60">
+                            {tnhSummary.totalAllocMau.toLocaleString()}
+                          </td>
+                          <td className="border border-slate-300 p-3 text-center text-slate-900 font-black">
+                            {tnhSummary.totalSurveyedHH} / {tnhSummary.totalHH} hộ ({tnhSummary.totalMembers} ng)
+                          </td>
+                          <td className="border border-slate-300 p-3 text-right text-emerald-950 font-black bg-emerald-100/40" title={`${tnhSummary.totalMembers} nhân khẩu thực tế điều tra`}>
+                            {tnhSummary.overallDirectPerCapita.toLocaleString()} đ
+                          </td>
+                          <td className="border border-slate-300 p-3 text-right text-rose-950 text-base font-black bg-amber-200/80 shadow-inner">
+                            {tnhSummary.overallExtrapolated.toLocaleString()} đ
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Right: Visual Chart Panel */}
+                  <div className="lg:col-span-5 bg-slate-50 border border-slate-300 rounded-lg p-4 flex flex-col gap-4 shadow-inner">
+                    <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                      <h4 className="font-extrabold text-slate-800 text-xs uppercase flex items-center gap-1.5">
+                        <BarChart3 className="w-4 h-4 text-teal-700" />
+                        <span>Biểu đồ tỷ trọng & TNBQ theo nhóm ngành</span>
+                      </h4>
+                      <span className="text-[11px] bg-teal-100 text-teal-950 font-bold px-2 py-0.5 rounded">
+                        {tnhScopeCommunes.length} Xã
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                      {tnhSummary.sectorData.map((s, idx) => {
+                        const colors = ['bg-emerald-600', 'bg-sky-600', 'bg-amber-500', 'bg-purple-600'];
+                        const barColor = colors[idx % colors.length];
+
+                        return (
+                          <div key={s.code} className="bg-white p-3 rounded-md border border-slate-200 shadow-2xs flex flex-col gap-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-bold text-slate-900 truncate max-w-[220px]" title={s.name}>
+                                {s.code}. {s.name}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-extrabold text-teal-800">{s.percent}%</span>
+                                <span className="text-slate-500 text-[11px]">({s.mauAlloc} mẫu)</span>
+                              </div>
+                            </div>
+
+                            <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
+                              <div 
+                                className={`h-2.5 rounded-full ${barColor} transition-all duration-500`}
+                                style={{ width: `${Math.max(5, Number(s.percent))}%` }}
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-between text-[11px] text-slate-600 pt-1 border-t border-slate-100">
+                              <span>Bảng kê: <strong>{s.bkCount.toLocaleString()}</strong> hộ</span>
+                              <span className="font-bold text-slate-900">Suy rộng: {s.extrapolatedIncomeYear.toLocaleString()} đ</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="bg-teal-900 text-white p-3 rounded-md flex flex-col gap-1 text-xs mt-auto">
+                      <span className="text-teal-200 text-[11px] font-bold">TNBQ bình quân toàn bộ phạm vi đang xem:</span>
+                      <div className="text-base font-black text-amber-300">
+                        {tnhSummary.overallExtrapolated.toLocaleString()} đ <span className="text-xs font-normal text-white">/người/năm</span>
+                      </div>
+                      <span className="text-[10px] text-teal-300">
+                        Đã điều tra: {tnhSummary.totalSurveyedHH} / {tnhSummary.totalHH} hộ ({tnhSummary.totalMembers} nhân khẩu)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Formula Legend Box matching drawing notes */}
@@ -7448,133 +7462,224 @@ export default function App() {
       )}
 
       {/* MODAL: XÓA TRẮNG / RESET PHIẾU ĐIỀU TRA THEO ĐỊA BÀN HOẶC HỘ */}
-      {isResetQuestionnaireModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="bg-white rounded-lg border border-slate-300 shadow-2xl max-w-lg w-full overflow-hidden text-xs">
-            <div className="bg-amber-600 text-white p-3.5 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <RefreshCw className="w-5 h-5 text-amber-200" />
-                <h3 className="font-bold text-sm">Xóa trắng / Reset Phiếu điều tra (Hộ nhập thử)</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsResetQuestionnaireModalOpen(false)}
-                className="text-white hover:bg-amber-700 p-1 rounded cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {isResetQuestionnaireModalOpen && (() => {
+        const allSurveyedList = households.filter(h => isHouseholdSurveyed(h) || h.surveyStatus !== 'CHUA_NHAP');
+        const currentCommuneSurveyedList = selectedCommuneId !== 'ALL' 
+          ? allSurveyedList.filter(h => h.communeId === selectedCommuneId || (Boolean(currentCommune?.communeCode) && h.communeCode === currentCommune?.communeCode))
+          : [];
 
-            <div className="p-4 flex flex-col gap-3.5 text-slate-700">
-              <p className="text-slate-600 leading-relaxed">
-                Tính năng này giúp xóa trắng nội dung phiếu (đưa về trạng thái chưa nhập ban đầu) cho các hộ do nhập thử nghiệm. Vui lòng chọn phạm vi cần reset:
-              </p>
-
-              <div className="flex flex-col gap-2.5">
-                <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800">
-                  <input
-                    type="radio"
-                    name="resetTargetType"
-                    value="area"
-                    checked={resetTargetType === 'area'}
-                    onChange={() => setResetTargetType('area')}
-                    className="cursor-pointer"
-                  />
-                  <span>Reset theo Địa bàn cụ thể</span>
-                </label>
-
-                {resetTargetType === 'area' && (
-                  <div className="pl-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <div>
-                      <span className="block text-[11px] font-semibold text-slate-600 mb-1">Xã:</span>
-                      <select
-                        value={resetCommuneId}
-                        onChange={e => {
-                          setResetCommuneId(e.target.value);
-                          setResetAreaId('ALL');
-                        }}
-                        className="w-full bg-white border border-slate-300 rounded p-1.5 font-semibold text-slate-800 text-xs"
-                      >
-                        <option value="ALL">-- Tất cả các xã --</option>
-                        {communes.map(c => (
-                          <option key={c.id} value={c.id}>
-                            {c.communeCode} - {c.communeName}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <span className="block text-[11px] font-semibold text-slate-600 mb-1">Địa bàn:</span>
-                      <select
-                        value={resetAreaId}
-                        onChange={e => setResetAreaId(e.target.value)}
-                        className="w-full bg-white border border-slate-300 rounded p-1.5 font-semibold text-slate-800 text-xs"
-                      >
-                        <option value="ALL">-- Tất cả địa bàn trong xã --</option>
-                        {areas
-                          .filter(a => resetCommuneId === 'ALL' || a.communeId === resetCommuneId)
-                          .map(a => (
-                            <option key={a.id} value={a.id}>
-                              ĐB {a.code} - {a.name}
-                            </option>
-                          ))}
-                      </select>
-                    </div>
-                  </div>
-                )}
-
-                <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 mt-1">
-                  <input
-                    type="radio"
-                    name="resetTargetType"
-                    value="selected"
-                    checked={resetTargetType === 'selected'}
-                    onChange={() => setResetTargetType('selected')}
-                    className="cursor-pointer"
-                  />
-                  <span>Reset các hộ đang được tích chọn trên bảng ({selectedHouseholdIds.length} hộ)</span>
-                </label>
-
-                <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 mt-1">
-                  <input
-                    type="radio"
-                    name="resetTargetType"
-                    value="all_filtered"
-                    checked={resetTargetType === 'all_filtered'}
-                    onChange={() => setResetTargetType('all_filtered')}
-                    className="cursor-pointer"
-                  />
-                  <span>Reset toàn bộ danh sách hộ đang hiển thị ({filteredHouseholds.length} hộ)</span>
-                </label>
-              </div>
-
-              <div className="bg-amber-50 border border-amber-200 rounded p-2.5 text-amber-900 text-[11px]">
-                ⚠️ <strong>Lưu ý:</strong> Hành động này sẽ xóa toàn bộ số liệu thu nhập đã nhập trong các biểu mẫu Phụ lục II của các hộ được chọn và đưa trạng thái về "Chưa nhập". Dữ liệu không thể khôi phục sau khi reset.
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 mt-1">
+        return (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-lg border border-slate-300 shadow-2xl max-w-2xl w-full overflow-hidden text-xs max-h-[92vh] flex flex-col">
+              <div className="bg-amber-600 text-white p-3.5 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  <RefreshCw className="w-5 h-5 text-amber-200" />
+                  <h3 className="font-bold text-sm">Xóa trắng / Reset Phiếu điều tra (Hộ nhập thử)</h3>
+                </div>
                 <button
                   type="button"
                   onClick={() => setIsResetQuestionnaireModalOpen(false)}
-                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded font-bold cursor-pointer"
+                  className="text-white hover:bg-amber-700 p-1 rounded cursor-pointer"
                 >
-                  Hủy bỏ
+                  <X className="w-4 h-4" />
                 </button>
-                <button
-                  type="button"
-                  onClick={handleResetQuestionnaires}
-                  disabled={isResettingQuestionnaire}
-                  className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded font-bold cursor-pointer shadow-xs flex items-center gap-1.5"
-                >
-                  {isResettingQuestionnaire && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  <span>Xác nhận xóa trắng phiếu</span>
-                </button>
+              </div>
+
+              <div className="p-4 flex flex-col gap-3.5 text-slate-700 overflow-y-auto">
+                <p className="text-slate-600 leading-relaxed">
+                  Tính năng này giúp xóa trắng nội dung phiếu (đưa về trạng thái chưa nhập ban đầu) cho các hộ do nhập thử nghiệm. Vui lòng chọn phạm vi cần reset:
+                </p>
+
+                {/* VỊ TRÍ CÁC HỘ ĐANG CÓ SỐ LIỆU ĐIỀU TRA ĐỂ QUAN SÁT RÕ RÀNG */}
+                {allSurveyedList.length > 0 ? (
+                  <div className="border border-amber-300 bg-amber-50/60 rounded p-2.5 flex flex-col gap-2">
+                    <div className="font-bold text-amber-950 flex flex-wrap items-center justify-between gap-1">
+                      <span>📍 Danh sách {allSurveyedList.length} hộ đang có số liệu điều tra trong hệ thống:</span>
+                      <span className="text-[11px] text-amber-800 font-medium">Bấm "Xóa" từng hộ hoặc chọn radio bên dưới để xóa hàng loạt</span>
+                    </div>
+                    <div className="max-h-40 overflow-y-auto border border-amber-200 rounded bg-white shadow-2xs">
+                      <table className="w-full text-[11px] border-collapse">
+                        <thead className="bg-amber-100 text-amber-900 sticky top-0 font-bold">
+                          <tr>
+                            <th className="p-1 border border-amber-200 text-center w-8">STT</th>
+                            <th className="p-1 border border-amber-200 text-left">Xã / Phường</th>
+                            <th className="p-1 border border-amber-200 text-left">Địa bàn (Tên sheet)</th>
+                            <th className="p-1 border border-amber-200 text-center w-14">STT Mẫu</th>
+                            <th className="p-1 border border-amber-200 text-left">Họ tên chủ hộ</th>
+                            <th className="p-1 border border-amber-200 text-center w-20">Trạng thái</th>
+                            <th className="p-1 border border-amber-200 text-center w-14">Thao tác</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {allSurveyedList.map((h, i) => (
+                            <tr key={h.id} className="hover:bg-amber-50/80 transition-colors">
+                              <td className="p-1 border border-amber-100 text-center text-slate-500">{i + 1}</td>
+                              <td className="p-1 border border-amber-100 font-semibold text-slate-800">{h.communeName || h.communeCode}</td>
+                              <td className="p-1 border border-amber-100 text-[#047484] font-medium">{(h as any).sheetName || h.areaName || `ĐB ${h.areaCode}`}</td>
+                              <td className="p-1 border border-amber-100 text-center font-bold text-slate-700">{h.sttMau}</td>
+                              <td className="p-1 border border-amber-100 font-bold text-slate-900">{h.householdHead}</td>
+                              <td className="p-1 border border-amber-100 text-center">
+                                <span className="px-1 py-0.5 rounded text-[10px] bg-amber-100 text-amber-900 font-semibold border border-amber-200">
+                                  {h.surveyStatus}
+                                </span>
+                              </td>
+                              <td className="p-1 border border-amber-100 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleResetSingleHousehold(h)}
+                                  className="px-1.5 py-0.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-[10px] font-bold cursor-pointer transition-colors shadow-2xs"
+                                  title="Xóa trắng phiếu của hộ này"
+                                >
+                                  Xóa
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded p-2.5 text-center font-bold text-xs flex items-center justify-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <span>Hệ thống hiện tại không còn hộ nào có dữ liệu nhập tin (0 hộ).</span>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-2.5 pt-1">
+                  {/* Tùy chọn 1: Xóa trắng toàn bộ hệ thống */}
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 bg-amber-50/80 hover:bg-amber-100/70 p-2 rounded border border-amber-200 transition-colors">
+                    <input
+                      type="radio"
+                      name="resetTargetType"
+                      value="all_system_surveyed"
+                      checked={resetTargetType === 'all_system_surveyed'}
+                      onChange={() => setResetTargetType('all_system_surveyed')}
+                      className="cursor-pointer"
+                    />
+                    <span>Xóa trắng TOÀN BỘ các hộ đã nhập tin trong toàn hệ thống ({allSurveyedList.length} hộ)</span>
+                  </label>
+
+                  {/* Tùy chọn 2: Xóa trắng các hộ trong xã đang chọn */}
+                  {selectedCommuneId !== 'ALL' && (
+                    <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 bg-sky-50/80 hover:bg-sky-100/70 p-2 rounded border border-sky-200 transition-colors">
+                      <input
+                        type="radio"
+                        name="resetTargetType"
+                        value="commune_surveyed"
+                        checked={resetTargetType === 'commune_surveyed'}
+                        onChange={() => setResetTargetType('commune_surveyed')}
+                        className="cursor-pointer"
+                      />
+                      <span>Xóa trắng các hộ đã nhập tin của Xã [{currentCommune?.communeCode}] {currentCommune?.communeName} ({currentCommuneSurveyedList.length} hộ)</span>
+                    </label>
+                  )}
+
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 mt-0.5">
+                    <input
+                      type="radio"
+                      name="resetTargetType"
+                      value="area"
+                      checked={resetTargetType === 'area'}
+                      onChange={() => setResetTargetType('area')}
+                      className="cursor-pointer"
+                    />
+                    <span>Reset theo Địa bàn cụ thể</span>
+                  </label>
+
+                  {resetTargetType === 'area' && (
+                    <div className="pl-6 grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded border border-slate-200">
+                      <div>
+                        <span className="block text-[11px] font-semibold text-slate-600 mb-1">Xã:</span>
+                        <select
+                          value={resetCommuneId}
+                          onChange={e => {
+                            setResetCommuneId(e.target.value);
+                            setResetAreaId('ALL');
+                          }}
+                          className="w-full bg-white border border-slate-300 rounded p-1.5 font-semibold text-slate-800 text-xs"
+                        >
+                          <option value="ALL">-- Tất cả các xã --</option>
+                          {communes.map(c => (
+                            <option key={c.id} value={c.id}>
+                              {c.communeCode} - {c.communeName}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <span className="block text-[11px] font-semibold text-slate-600 mb-1">Địa bàn:</span>
+                        <select
+                          value={resetAreaId}
+                          onChange={e => setResetAreaId(e.target.value)}
+                          className="w-full bg-white border border-slate-300 rounded p-1.5 font-semibold text-slate-800 text-xs"
+                        >
+                          <option value="ALL">-- Tất cả địa bàn trong xã --</option>
+                          {areas
+                            .filter(a => resetCommuneId === 'ALL' || a.communeId === resetCommuneId)
+                            .map(a => (
+                              <option key={a.id} value={a.id}>
+                                ĐB {a.code} - {a.name}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 mt-0.5">
+                    <input
+                      type="radio"
+                      name="resetTargetType"
+                      value="selected"
+                      checked={resetTargetType === 'selected'}
+                      onChange={() => setResetTargetType('selected')}
+                      className="cursor-pointer"
+                    />
+                    <span>Reset các hộ đang được tích chọn trên bảng ({selectedHouseholdIds.length} hộ)</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 mt-0.5">
+                    <input
+                      type="radio"
+                      name="resetTargetType"
+                      value="all_filtered"
+                      checked={resetTargetType === 'all_filtered'}
+                      onChange={() => setResetTargetType('all_filtered')}
+                      className="cursor-pointer"
+                    />
+                    <span>Reset toàn bộ danh sách hộ đang hiển thị ({filteredHouseholds.length} hộ)</span>
+                  </label>
+                </div>
+
+                <div className="bg-amber-50 border border-amber-200 rounded p-2.5 text-amber-900 text-[11px]">
+                  ⚠️ <strong>Lưu ý:</strong> Hành động này sẽ xóa toàn bộ số liệu thu nhập đã nhập trong các biểu mẫu Phụ lục II của các hộ được chọn và đưa trạng thái về "Chưa nhập". Dữ liệu không thể khôi phục sau khi reset.
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 mt-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsResetQuestionnaireModalOpen(false)}
+                    className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded font-bold cursor-pointer"
+                  >
+                    Hủy bỏ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetQuestionnaires}
+                    disabled={isResettingQuestionnaire}
+                    className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded font-bold cursor-pointer shadow-xs flex items-center gap-1.5"
+                  >
+                    {isResettingQuestionnaire && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    <span>Xác nhận xóa trắng phiếu</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <footer className="bg-sky-900 text-sky-200 py-3 text-center text-xs border-t border-sky-950 mt-auto">
         <p>Hệ thống Quản lý Thống kê Thu nhập Hộ gia đình © 2026 - Phiếu thu thập thông tin Phụ lục II</p>

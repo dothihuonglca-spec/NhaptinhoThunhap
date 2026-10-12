@@ -173,6 +173,36 @@ export default function SurveyorManagement({
     }
   }, [communes, areas]);
 
+  // Hàm chuẩn hóa lấy tên địa bàn chính xác từ Bảng kê (ưu tiên Tên sheet, loại bỏ 001 hoặc mã số thô)
+  const getAreaDisplayName = (areaIdOrCode: string, communeIdOrCode?: string) => {
+    const matchedArea = areas.find(a => 
+      a.id === areaIdOrCode || 
+      (a.code === areaIdOrCode && (!communeIdOrCode || a.communeId === communeIdOrCode || (a as any).communeCode === communeIdOrCode))
+    ) || areas.find(a => a.code === areaIdOrCode);
+
+    const matchedH = households.find(h => 
+      (h.areaId === areaIdOrCode || h.areaCode === areaIdOrCode || (matchedArea && (h.areaId === matchedArea.id || h.areaCode === matchedArea.code))) &&
+      (!communeIdOrCode || h.communeId === communeIdOrCode || (h as any).communeCode === communeIdOrCode) &&
+      Boolean((h as any).sheetName || h.areaName) &&
+      (h as any).sheetName !== '001' && h.areaName !== '001' &&
+      (h as any).sheetName !== (matchedArea?.code || areaIdOrCode) && h.areaName !== (matchedArea?.code || areaIdOrCode) &&
+      (h as any).sheetName !== 'Địa bàn' && h.areaName !== 'Địa bàn' &&
+      !(h as any).sheetName?.startsWith('Địa bàn 001') && !h.areaName?.startsWith('Địa bàn 001')
+    );
+
+    const rawName = ((matchedH as any)?.sheetName && (matchedH as any).sheetName.trim() && (matchedH as any).sheetName !== '001' && (matchedH as any).sheetName !== 'Địa bàn' && !(matchedH as any).sheetName.startsWith('Địa bàn 001'))
+      ? (matchedH as any).sheetName.trim()
+      : (matchedArea?.name && matchedArea.name.trim() && matchedArea.name !== '001' && matchedArea.name !== matchedArea.code && matchedArea.name !== 'Địa bàn' && !matchedArea.name.startsWith('Địa bàn 001'))
+      ? matchedArea.name.trim()
+      : (matchedH?.areaName && matchedH.areaName.trim() && matchedH.areaName !== '001' && matchedH.areaName !== 'Địa bàn' && matchedH.areaName !== matchedH.areaCode && !matchedH.areaName.startsWith('Địa bàn 001'))
+      ? matchedH.areaName.trim()
+      : (matchedArea?.name && matchedArea.name.trim() && matchedArea.name !== '001' && !matchedArea.name.startsWith('Địa bàn 001'))
+      ? matchedArea.name.trim()
+      : `Địa bàn ${matchedArea?.code || areaIdOrCode}`;
+
+    return rawName;
+  };
+
   const openAddModal = (defaultDeptId?: string) => {
     const count = surveyors.length + 1;
     const nextCode = `DTV${count < 10 ? '0' + count : count}`;
@@ -214,8 +244,9 @@ export default function SurveyorManagement({
     const matchedIds = areas.filter(a => 
       s.assignedAreas.includes(a.id) || 
       s.assignedAreas.includes(`${a.communeId}_${a.code}`) ||
-      (a as any).communeCode && s.assignedAreas.includes(`${(a as any).communeCode}_${a.code}`) ||
-      (s.assignedAreas.includes(a.code) && areas.filter(x => x.code === a.code).length === 1)
+      ((a as any).communeCode && s.assignedAreas.includes(`${(a as any).communeCode}_${a.code}`)) ||
+      households.some(h => (h.assignedSurveyorId === s.id || h.assignedSurveyorName === s.name) && (h.areaId === a.id || h.areaCode === a.code)) ||
+      (s.assignedAreas.includes(a.code) && (areas.filter(x => x.code === a.code).length === 1 || (s.assignedCommunes && (s.assignedCommunes.includes(a.communeId) || ((a as any).communeCode && s.assignedCommunes.includes((a as any).communeCode))))))
     ).map(a => a.id);
     setFormAssignedAreas(matchedIds);
     setModalTkcsFilter('ALL');
@@ -263,7 +294,7 @@ export default function SurveyorManagement({
 
     try {
       setIsSubmitting(true);
-      const assigned = formAllAreas ? ['ALL'] : Array.from(new Set(formAssignedAreas.map(id => {
+      const assigned = formAllAreas ? ['ALL'] : Array.from(new Set(formAssignedAreas.filter(id => id && id !== '001').map(id => {
         const ar = areas.find(a => a.id === id);
         return ar ? ar.id : id;
       })));
@@ -727,7 +758,7 @@ export default function SurveyorManagement({
                             className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-900 border border-sky-200 flex items-center gap-1"
                           >
                             <MapPin className="w-2.5 h-2.5 text-sky-700" />
-                            <span>ĐB {a.code} ({a.name})</span>
+                            <span>{getAreaDisplayName(a.id, a.communeId)} (ĐB {a.code})</span>
                           </span>
                         ))}
                         {assignedAreaObjs.length === 0 && !(dept.assignedAreaCodes || []).includes('ALL') && (
@@ -850,8 +881,8 @@ export default function SurveyorManagement({
                     .map(a => {
                       const commObj = communes.find(c => c.id === a.communeId || c.communeCode === (a as any).communeCode);
                       return (
-                        <option key={a.id} value={a.code}>
-                          ĐB {a.code} - {a.name} {commObj ? `(${commObj.communeName})` : ''}
+                        <option key={a.id} value={a.id}>
+                          {getAreaDisplayName(a.id, a.communeId)} (ĐB {a.code}) {commObj ? `• ${commObj.communeName}` : ''}
                         </option>
                       );
                     })}
@@ -1034,16 +1065,21 @@ export default function SurveyorManagement({
                             </span>
                           ) : (
                             <div className="flex flex-wrap gap-1">
-                              {s.assignedAreas.map(item => {
+                              {s.assignedAreas.filter(item => item !== '001' || areas.some(a => a.code === '001')).map(item => {
                                 const areaObj = areas.find(a => a.id === item || a.code === item || `${a.communeId}_${a.code}` === item);
                                 const commObj = areaObj ? communes.find(c => c.id === areaObj.communeId || c.communeCode === (areaObj as any).communeCode) : null;
+                                const displayName = getAreaDisplayName(item, areaObj?.communeId);
                                 return (
                                   <span
                                     key={item}
-                                    className="px-2 py-0.5 rounded font-bold text-[11px] bg-sky-100 text-sky-900 border border-sky-300 inline-flex items-center gap-1"
+                                    className="px-2 py-0.5 rounded font-bold text-[11px] bg-sky-100 text-sky-900 border border-sky-300 inline-flex items-center gap-1 shadow-2xs"
+                                    title={`Mã địa bàn: ${areaObj ? areaObj.code : item}`}
                                   >
-                                    <MapPin className="w-3 h-3 text-sky-700" />
-                                    <span>ĐB {areaObj ? areaObj.code : item} {commObj ? `(${commObj.communeName})` : ''}</span>
+                                    <MapPin className="w-3 h-3 text-sky-700 shrink-0" />
+                                    <span>{displayName}</span>
+                                    <span className="text-[10px] text-sky-700 font-normal">
+                                      (ĐB {areaObj ? areaObj.code : item}{commObj ? ` - ${commObj.communeName}` : ''})
+                                    </span>
                                   </span>
                                 );
                               })}
@@ -1542,19 +1578,24 @@ export default function SurveyorManagement({
                             return (
                               <label
                                 key={area.id}
-                                className={`flex items-center gap-2 p-1.5 rounded cursor-pointer text-[11px] border transition-colors ${
-                                  isChecked ? 'bg-sky-50 border-sky-300 font-bold text-sky-950' : 'border-slate-200 hover:bg-slate-50'
+                                className={`flex items-start gap-2 p-1.5 rounded cursor-pointer text-[11px] border transition-colors ${
+                                  isChecked ? 'bg-sky-50 border-sky-300 font-bold text-sky-950 shadow-2xs' : 'border-slate-200 hover:bg-slate-50'
                                 }`}
                               >
                                 <input
                                   type="checkbox"
                                   checked={isChecked}
                                   onChange={() => handleToggleAreaCheckbox(area.id)}
-                                  className="rounded text-sky-700"
+                                  className="rounded text-sky-700 mt-0.5 shrink-0"
                                 />
-                                <span>
-                                  ĐB {area.code} {commObj ? `(${commObj.communeName})` : `(${area.name})`}
-                                </span>
+                                <div className="flex flex-col min-w-0">
+                                  <span className="font-bold text-slate-900 truncate">
+                                    {getAreaDisplayName(area.id, area.communeId)}
+                                  </span>
+                                  <span className="text-[10px] text-slate-500 font-normal truncate">
+                                    ĐB {area.code} {commObj ? `• ${commObj.communeName}` : ''}
+                                  </span>
+                                </div>
                               </label>
                             );
                           })}
@@ -1773,7 +1814,7 @@ export default function SurveyorManagement({
                             onChange={() => handleToggleDeptAreaCheckbox(area.code)}
                             className="rounded text-sky-700"
                           />
-                          <span>ĐB {area.code} - {area.name}</span>
+                          <span>{getAreaDisplayName(area.id, area.communeId)} (ĐB {area.code})</span>
                         </label>
                       );
                     })}

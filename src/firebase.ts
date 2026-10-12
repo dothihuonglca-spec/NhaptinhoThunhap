@@ -19,12 +19,13 @@ const firebaseConfig = {
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 
-const databaseId = appletConfig.firestoreDatabaseId || "ai-studio-hthngqunlnhptint-be6c0a68-6f02-4abf-8290-90623634770f";
+const rawDbId = appletConfig.firestoreDatabaseId;
+const databaseId = (!rawDbId || rawDbId === '(default)') ? undefined : rawDbId;
 
 // Initialize Firestore with memory local cache to prevent quota loops
-export const db = initializeFirestore(app, {
-  localCache: memoryLocalCache()
-}, databaseId);
+export const db = databaseId 
+  ? initializeFirestore(app, { localCache: memoryLocalCache() }, databaseId)
+  : initializeFirestore(app, { localCache: memoryLocalCache() });
 
 export const auth = getAuth(app);
 

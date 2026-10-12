@@ -598,6 +598,7 @@ export default function ExcelHeaderConfigModal({
         tempAreas.push({
           id: areaId,
           communeId: newCommuneId,
+          communeCode: resolvedCommuneCode,
           code: areaCode,
           name: sName,
           householdCount: finalized.length
