@@ -10,6 +10,18 @@ service cloud.firestore {
       return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
 
+    function isSupervisor() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SUPERVISOR';
+    }
+
+    function isSurveyor() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'SURVEYOR';
+    }
+
+    function userData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
     // Default deny all
     match /{document=**} {
       allow read, write: if false;
@@ -23,6 +35,37 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
       allow write: if isAdmin();
+    }
+
+    // Communes - all authenticated users can read, admins can write
+    match /communes/{communeId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Survey Areas - all authenticated users can read, admins/supervisors can write
+    match /surveyAreas/{areaId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isSupervisor();
+    }
+
+    // Surveyors - authenticated users can read, admins can write
+    match /surveyors/{surveyorId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Households - authenticated users can read based on assignment, admins/supervisors can write
+    match /households/{householdId} {
+      allow read: if isSignedIn() && (
+        isAdmin() ||
+        isSupervisor() ||
+        (userData().assignedAreas.hasAny(resource.data.assignedAreaIds) && !userData().assignedAreas.hasAny(['ALL'])) ||
+        userData().assignedAreas.hasAny(['ALL'])
+      );
+      allow create: if isAdmin() || isSupervisor();
+      allow update: if isAdmin() || isSupervisor();
+      allow delete: if isAdmin();
     }
 
     // Example data collection
