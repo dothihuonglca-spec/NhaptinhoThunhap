@@ -6386,6 +6386,8 @@ export default function App() {
               showNotification('success', `Đang thao tác với vai trò: ${s.name} (${ROLE_LABELS[s.role]?.label || s.role})`);
             }}
             showNotification={showNotification}
+            onSyncFirebase={handleSyncFirebase}
+            isSyncing={isSyncing}
           />
         )}
 

@@ -53,6 +53,8 @@ interface SurveyorManagementProps {
   onBatchAssignDepartmentArea: (departmentId: string, areaCodes: string[]) => Promise<void>;
   onSelectActiveUser: (surveyor: Surveyor) => void;
   showNotification: (type: 'success' | 'error', msg: string) => void;
+  onSyncFirebase?: () => Promise<void>;
+  isSyncing?: boolean;
 }
 
 export default function SurveyorManagement({
@@ -69,7 +71,9 @@ export default function SurveyorManagement({
   onBatchAssignArea,
   onBatchAssignDepartmentArea,
   onSelectActiveUser,
-  showNotification
+  showNotification,
+  onSyncFirebase,
+  isSyncing = false
 }: SurveyorManagementProps) {
   const [subTab, setSubTab] = useState<'departments' | 'surveyors'>('surveyors');
   const [searchTerm, setSearchTerm] = useState('');
@@ -448,6 +452,35 @@ export default function SurveyorManagement({
 
   return (
     <div className="flex flex-col gap-4 w-full">
+      {/* Firebase Sync & Quota Info Card */}
+      <div className="bg-sky-50 border border-sky-200 rounded-lg p-4 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="p-2 bg-sky-600 text-white rounded-lg mt-0.5">
+            <RefreshCw className={`w-5 h-5 ${isSyncing ? 'animate-spin' : ''}`} />
+          </div>
+          <div>
+            <h3 className="font-bold text-sky-950 text-sm flex items-center gap-2">
+              <span>Trạng thái Đồng bộ & Hạn mức Firebase Firestore</span>
+              <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-black text-[10px]">Trực tuyến</span>
+            </h3>
+            <p className="text-xs text-slate-600 mt-1 leading-relaxed">                         
+              • <em></em>Dữ liệu luôn được lưu tại bộ nhớ trình duyệt (LocalStorage).Bấm nút đồng bộ để kiểm tra kết nối Cloud.
+            </p>
+          </div>
+        </div>
+        {onSyncFirebase && (
+          <button
+            type="button"
+            onClick={onSyncFirebase}
+            disabled={isSyncing}
+            className="px-4 py-2 bg-sky-800 hover:bg-sky-700 active:bg-sky-900 disabled:opacity-50 text-white rounded-lg font-bold text-xs flex items-center gap-2 shadow-sm cursor-pointer transition-colors shrink-0"
+          >
+            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+            <span>{isSyncing ? 'Đang đồng bộ...' : 'Đồng bộ ngay với Firebase'}</span>
+          </button>
+        )}
+      </div>
+
       {/* Top Banner and Navigation */}
       <div className="bg-white p-4 rounded-lg border border-slate-300 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
