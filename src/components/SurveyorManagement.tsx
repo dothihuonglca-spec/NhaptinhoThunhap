@@ -11,7 +11,7 @@ import {
   Building2, Briefcase, Phone, Mail, FileText, CheckSquare, Sparkles,
   ArrowRight, ShieldAlert, BadgeHelp
 } from 'lucide-react';
-import { Surveyor, UserRole, Department, DEFAULT_5_DEPARTMENTS, ROLE_LABELS } from '../types/user';
+import { Surveyor, UserRole, Department, ROLE_LABELS } from '../types/user';
 
 interface SurveyArea {
   id: string;
@@ -836,7 +836,7 @@ export default function SurveyorManagement({
                 >
                   {surveyors.map(s => (
                     <option key={s.id} value={s.id}>
-                      {s.code} - {s.name} ({s.department || ROLE_LABELS[s.role].label})
+                      {s.code} - {s.name} ({s.department || (ROLE_LABELS[s.role as UserRole]?.label ?? 'Không xác định')})
                     </option>
                   ))}
                 </select>
@@ -1338,7 +1338,7 @@ export default function SurveyorManagement({
                 ) : (
                   <div className="grid grid-cols-3 gap-2">
                     {(['SURVEYOR', 'ADMIN', 'SUPERVISOR'] as UserRole[]).map(role => {
-                      const r = ROLE_LABELS[role];
+                      const r = ROLE_LABELS[role as UserRole] ?? { label: 'Không xác định' };
                       const isSelected = formRole === role;
                       return (
                         <button

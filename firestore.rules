@@ -1,26 +1,39 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /communes/{communeId} {
-      allow read, write: if true;
+    
+    function isSignedIn() {
+      return request.auth != null;
     }
-    match /surveyAreas/{areaId} {
-      allow read, write: if true;
+
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
-    match /households/{householdId} {
-      allow read, write: if true;
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
     }
-    match /surveyors/{surveyorId} {
-      allow read, write: if true;
+
+    match /departments/{deptId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
-    match /enterprises_01/{enterpriseId} {
-      allow read, write: if true;
+
+    match /users/{userId} {
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin();
     }
-    match /establishments_02/{establishmentId} {
-      allow read, write: if true;
-    }
-    match /industrial_summaries/{summaryId} {
-      allow read, write: if true;
+
+    // Example data collection
+    match /surveys/{surveyId} {
+      allow read: if isSignedIn() && (
+        isAdmin() || 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedAreaCodes.hasAny(resource.data.areaCodes) ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedAreaCodes.hasAny(['ALL'])
+      );
+      allow create: if isSignedIn(); // Needs more granular validation in real app
+      allow update: if isAdmin();
     }
   }
 }

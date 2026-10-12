@@ -13,8 +13,9 @@ import {
   Shield, ShieldCheck, Lock, Unlock, Eye, EyeOff, CheckSquare, Square, UserCheck, ShieldAlert, AlertTriangle, X,
   LogOut, LogIn, KeyRound, User, TrendingUp, ExternalLink, RotateCcw
 } from 'lucide-react';
-import { db, handleFirestoreError, OperationType, safeFirestoreWrite, isQuotaExceeded } from './firebase';
+import { db, handleFirestoreError, OperationType, safeFirestoreWrite, isQuotaExceeded, auth } from './firebase';
 import { collection, getDocs, addDoc, deleteDoc, doc, setDoc, query, onSnapshot, writeBatch } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 
 import { FullQuestionnaire, createDefaultQuestionnaire } from './types/questionnaire';
 import { calculateFullIncome } from './utils/incomeCalculator';
@@ -30,7 +31,7 @@ import { IndustrialSurveyPage } from './modules/industrialSurvey';
 import bannerImg from './assets/images/background-ngoai-troi-dep_042633251.jpg';
 import { OFFICIAL_COMMUNES_CATALOG } from './data/communesCatalog';
 import { 
-  Surveyor, UserRole, SurveyStatus, Department, DEFAULT_5_DEPARTMENTS, ROLE_LABELS, SURVEY_STATUS_LABELS 
+  Surveyor, UserRole, SurveyStatus, Department, ROLE_LABELS, SURVEY_STATUS_LABELS 
 } from './types/user';
 import { 
   OFFICIAL_PERSONNEL_LIST, OFFICIAL_5_DEPARTMENTS, INITIAL_DEFAULT_PASSWORD 
@@ -174,7 +175,8 @@ export default function App() {
   const [areas, setAreas] = useState<SurveyArea[]>([]);
   const [households, setHouseholds] = useState<Household[]>([]);
   const [surveyors, setSurveyors] = useState<Surveyor[]>([]);
-  const [departments, setDepartments] = useState<Department[]>(DEFAULT_5_DEPARTMENTS);
+  const [departments, setDepartments] = useState<Department[]>([]);
+
   const [currentSurveyorId, setCurrentSurveyorId] = useState<string>('admin');
   const [loading, setLoading] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
@@ -183,6 +185,31 @@ export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState<boolean>(false);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setIsLoggedIn(true);
+        // Fetch departments here when logged in
+        const fetchDepartments = async () => {
+          try {
+            const snapshot = await getDocs(collection(db, 'departments'));
+            const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Department));
+            setDepartments(data);
+          } catch (err) {
+            console.error('Error fetching departments:', err);
+          }
+        };
+        fetchDepartments();
+      } else {
+        setIsLoggedIn(false);
+        setDepartments([]);
+      }
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
   
   // Login form state
   const [loginIdentifier, setLoginIdentifier] = useState<string>('');
