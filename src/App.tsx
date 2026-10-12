@@ -5977,32 +5977,6 @@ export default function App() {
             </div>
 
             {/* Formula Legend Box matching drawing notes */}
-            <div className="bg-amber-50 border border-amber-300 rounded-lg p-3 text-xs text-amber-950 flex flex-col gap-1.5 shadow-2xs">
-              <p className="font-bold text-amber-900 flex items-center gap-1.5 text-xs">
-                <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0" />
-                <span>Quy tắc tính toán tự động chuẩn hóa theo điều tra:</span>
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-0.5">
-                <div className="bg-white p-2.5 rounded border border-amber-200">
-                  <span className="font-bold text-amber-900 block mb-0.5">1. TNBQ đầu người/tháng theo loại hộ:</span>
-                  <code className="text-[11px] font-bold text-emerald-900 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 block">
-                    = Tổng thu nhập nhóm / Tổng số nhân khẩu đã điều tra / 12
-                  </code>
-                </div>
-                <div className="bg-white p-2.5 rounded border border-amber-200">
-                  <span className="font-bold text-amber-900 block mb-0.5">2. Suy rộng TNBQ theo loại hộ:</span>
-                  <code className="text-[11px] font-bold text-sky-900 bg-sky-50 px-1.5 py-0.5 rounded border border-sky-200 block">
-                    = Tỉ trọng cơ cấu (%) * TNBQ theo loại hộ
-                  </code>
-                </div>
-                <div className="bg-white p-2.5 rounded border border-amber-200">
-                  <span className="font-bold text-amber-900 block mb-0.5">3. TNBQ bình quân toàn xã / TKCS:</span>
-                  <code className="text-[11px] font-bold text-purple-900 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 block">
-                    = Tổng Suy rộng của 4 loại hộ
-                  </code>
-                </div>
-              </div>
-            </div>
 
             {/* Lower Sector Breakdown Tables matching image (Sections I, II, III, IV) */}
             {tnhScopeMode !== 'COMMUNE_QUICK' ? (
