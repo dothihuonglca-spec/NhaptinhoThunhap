@@ -1089,54 +1089,10 @@ export default function App() {
       return next;
     });
 
-    // 2. Sync to Firestore synchronously and await completion
-    try {
-      setUploadProgressText(`Đang đồng bộ ${totalCount} hộ lên Firebase...`);
-      if (isOverwrite) {
-        const oldAreas = areas.filter(a => allIdsToRemove.has(a.communeId) || a.communeId === communeData.id);
-        const oldHhs = households.filter(h => 
-          allIdsToRemove.has(h.communeId) || 
-          h.communeId === communeData.id || 
-          (communeData.communeCode && h.communeCode && h.communeCode.trim().toLowerCase() === communeData.communeCode.trim().toLowerCase()) ||
-          (communeData.communeName && h.communeName && h.communeName.trim().toLowerCase() === communeData.communeName.trim().toLowerCase())
-        );
-        const toDeleteRefs = [
-          ...Array.from(allIdsToRemove).map(id => doc(db, 'communes', id)),
-          ...oldAreas.map(a => doc(db, 'surveyAreas', a.id)),
-          ...oldHhs.map(h => doc(db, 'households', h.id))
-        ];
-
-        for (let i = 0; i < toDeleteRefs.length; i += 300) {
-          const chunk = toDeleteRefs.slice(i, i + 300);
-          const batch = writeBatch(db);
-          chunk.forEach(r => batch.delete(r));
-          await batch.commit();
-        }
-      }
-
-      const allDocs = [
-        { ref: doc(db, 'communes', communeData.id), data: communeData },
-        ...areasData.map(a => ({ ref: doc(db, 'surveyAreas', a.id), data: a })),
-        ...householdsData.map(h => ({ ref: doc(db, 'households', h.id), data: h }))
-      ];
-
-      for (let i = 0; i < allDocs.length; i += 300) {
-        const chunk = allDocs.slice(i, i + 300);
-        const batch = writeBatch(db);
-        chunk.forEach(item => batch.set(item.ref, item.data));
-        await batch.commit();
-      }
-    } catch (bgErr: any) {
-      console.error("Firebase sync error during import:", bgErr);
-      handleFirestoreError(bgErr, OperationType.WRITE, 'households');
-      showNotification('error', `Cảnh báo: Đã lưu cục bộ nhưng đồng bộ Firebase gặp lỗi: ${bgErr?.message || 'Lỗi mạng'}`);
-    } finally {
-      setIsUploading(false);
-    }
-
     setSelectedCommuneId(communeData.id);
     setSelectedAreaId('ALL');
     setCurrentPage(1);
+    setIsUploading(false);
 
     if (skippedSheetsList.length > 0) {
       setUploadReport({
@@ -1145,15 +1101,57 @@ export default function App() {
         skippedSheets: skippedSheetsList
       });
       showNotification('success', isOverwrite 
-        ? `Đã GHI ĐÈ thành công xã [${communeData.communeCode}] ${communeData.communeName}: ${totalCount} hộ (${areasData.length} địa bàn) lên Firebase.`
-        : `Đã nạp thành công ${totalCount} hộ (${areasData.length} địa bàn) lên Firebase.`
+        ? `Đã GHI ĐÈ thành công xã [${communeData.communeCode}] ${communeData.communeName}: ${totalCount} hộ (${areasData.length} địa bàn). Đang đồng bộ lên Firebase ở nền...`
+        : `Đã nạp thành công ${totalCount} hộ (${areasData.length} địa bàn). Đang đồng bộ lên Firebase ở nền...`
       );
     } else {
       showNotification('success', isOverwrite 
-        ? `Đã GHI ĐÈ thành công dữ liệu xã [${communeData.communeCode}] ${communeData.communeName} (${areasData.length} địa bàn, ${totalCount} hộ) lên Firebase.`
-        : `Đã import thành công ${totalCount} hộ lên Firebase.`
+        ? `Đã GHI ĐÈ thành công dữ liệu xã [${communeData.communeCode}] ${communeData.communeName} (${areasData.length} địa bàn, ${totalCount} hộ). Đang đồng bộ lên Firebase ở nền...`
+        : `Đã import thành công ${totalCount} hộ. Đang đồng bộ lên Firebase ở nền...`
       );
     }
+
+    // 2. Background Firestore write
+    setTimeout(async () => {
+      try {
+        if (isOverwrite) {
+          const oldAreas = areas.filter(a => allIdsToRemove.has(a.communeId) || a.communeId === communeData.id);
+          const oldHhs = households.filter(h => 
+            allIdsToRemove.has(h.communeId) || 
+            h.communeId === communeData.id || 
+            (communeData.communeCode && h.communeCode && h.communeCode.trim().toLowerCase() === communeData.communeCode.trim().toLowerCase()) ||
+            (communeData.communeName && h.communeName && h.communeName.trim().toLowerCase() === communeData.communeName.trim().toLowerCase())
+          );
+          const toDeleteRefs = [
+            ...Array.from(allIdsToRemove).map(id => doc(db, 'communes', id)),
+            ...oldAreas.map(a => doc(db, 'surveyAreas', a.id)),
+            ...oldHhs.map(h => doc(db, 'households', h.id))
+          ];
+
+          for (let i = 0; i < toDeleteRefs.length; i += 300) {
+            const chunk = toDeleteRefs.slice(i, i + 300);
+            const batch = writeBatch(db);
+            chunk.forEach(r => batch.delete(r));
+            await batch.commit();
+          }
+        }
+
+        const allDocs = [
+          { ref: doc(db, 'communes', communeData.id), data: communeData },
+          ...areasData.map(a => ({ ref: doc(db, 'surveyAreas', a.id), data: a })),
+          ...householdsData.map(h => ({ ref: doc(db, 'households', h.id), data: h }))
+        ];
+
+        for (let i = 0; i < allDocs.length; i += 300) {
+          const chunk = allDocs.slice(i, i + 300);
+          const batch = writeBatch(db);
+          chunk.forEach(item => batch.set(item.ref, item.data));
+          await batch.commit();
+        }
+      } catch (bgErr) {
+        console.warn("Background Firebase sync warning:", bgErr);
+      }
+    }, 100);
   };
 
   const handleConfirmOverwriteCommune = async () => {
