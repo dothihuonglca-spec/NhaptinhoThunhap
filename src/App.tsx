@@ -199,6 +199,7 @@ export default function App() {
   const [tnhSelectedCommuneId, setTnhSelectedCommuneId] = useState<string>('ALL');
   const [tnhSelectedTkcs, setTnhSelectedTkcs] = useState<string>('ALL');
   const [tnhSurveyorOnlyMine, setTnhSurveyorOnlyMine] = useState<boolean>(true);
+  const [tnhPivotMode, setTnhPivotMode] = useState<boolean>(false);
 
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadProgressText, setUploadProgressText] = useState<string>('');
@@ -263,6 +264,11 @@ export default function App() {
   const [areaToDelete, setAreaToDelete] = useState<SurveyArea | null>(null);
   const [householdToDelete, setHouseholdToDelete] = useState<Household | null>(null);
   const [isBatchDeleteModalOpen, setIsBatchDeleteModalOpen] = useState<boolean>(false);
+  const [isResetQuestionnaireModalOpen, setIsResetQuestionnaireModalOpen] = useState<boolean>(false);
+  const [resetTargetType, setResetTargetType] = useState<'area' | 'selected' | 'all_filtered'>('area');
+  const [resetCommuneId, setResetCommuneId] = useState<string>('ALL');
+  const [resetAreaId, setResetAreaId] = useState<string>('ALL');
+  const [isResettingQuestionnaire, setIsResettingQuestionnaire] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [deleteProgressText, setDeleteProgressText] = useState<string>('');
 
@@ -3428,6 +3434,69 @@ export default function App() {
     }
   };
 
+  const handleResetQuestionnaires = async () => {
+    setIsResettingQuestionnaire(true);
+    let targetIds: string[] = [];
+    if (resetTargetType === 'area') {
+      const matching = households.filter(h => {
+        if (resetCommuneId !== 'ALL' && h.communeId !== resetCommuneId) return false;
+        if (resetAreaId !== 'ALL' && h.areaId !== resetAreaId && h.areaCode !== resetAreaId) return false;
+        return true;
+      });
+      targetIds = matching.map(h => h.id);
+    } else if (resetTargetType === 'selected') {
+      targetIds = [...selectedHouseholdIds];
+    } else if (resetTargetType === 'all_filtered') {
+      targetIds = filteredHouseholds.map(h => h.id);
+    }
+
+    if (targetIds.length === 0) {
+      showNotification('error', 'Không tìm thấy hộ nào phù hợp để xóa trắng phiếu.');
+      setIsResettingQuestionnaire(false);
+      return;
+    }
+
+    const updatedHouseholds = households.map(h => {
+      if (targetIds.includes(h.id)) {
+        return {
+          ...h,
+          surveyStatus: 'CHUA_NHAP' as SurveyStatus,
+          questionnaire: createDefaultQuestionnaire(),
+          updatedBy: currentUser.name,
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return h;
+    });
+
+    setHouseholds(updatedHouseholds);
+    try { localStorage.setItem('cached_households', JSON.stringify(updatedHouseholds)); } catch (e) {}
+    setSelectedHouseholdIds([]);
+    setIsResetQuestionnaireModalOpen(false);
+    setIsResettingQuestionnaire(false);
+    showNotification('success', `Đã xóa trắng (reset) thành công phiếu điều tra của ${targetIds.length} hộ!`);
+
+    setTimeout(async () => {
+      try {
+        const chunked = updatedHouseholds.filter(h => targetIds.includes(h.id));
+        for (let i = 0; i < chunked.length; i += 300) {
+          const batch = writeBatch(db);
+          chunked.slice(i, i + 300).forEach(h => {
+            batch.update(doc(db, 'households', h.id), {
+              surveyStatus: 'CHUA_NHAP',
+              questionnaire: createDefaultQuestionnaire(),
+              updatedBy: currentUser.name,
+              updatedAt: new Date().toISOString()
+            });
+          });
+          await batch.commit();
+        }
+      } catch (e) {
+        console.warn("Batch reset questionnaire error:", e);
+      }
+    }, 50);
+  };
+
   const handleExportExcel = () => {
     const wb = XLSX.utils.book_new();
     const wsData: any[][] = [
@@ -4191,33 +4260,28 @@ export default function App() {
               </div>
             )}
 
+            {/* Thêm mt-[0.5cm] để đẩy nút đăng nhập xuống thêm 0.5cm */}
             <button
               type="submit"
-              className="w-full py-2.5 bg-sky-800 hover:bg-sky-700 active:bg-sky-900 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md transition-colors"
+              className="w-full mt-[0.5cm] py-2.5 bg-sky-800 hover:bg-sky-700 active:bg-sky-900 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md transition-colors"
             >
               <LogIn className="w-4 h-4" />
               <span>Đăng nhập hệ thống</span>
             </button>
 
-            <div className="mt-1 pt-3 border-t border-slate-200 text-slate-600 text-[11px] leading-relaxed flex flex-col gap-1.5">
+            <div className="mt-[1.5cm] pt-3 border-t border-slate-200 text-slate-600 text-[11px] leading-relaxed flex flex-col gap-1.5">
               <div className="flex items-center justify-between text-slate-800 font-bold">
-                <span className="flex items-center gap-1.5 text-sky-900 font-bold">
-                  <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>Hệ thống Thống kê Thu nhập Hộ</span>
-                </span>
-                <span className="bg-sky-100 text-sky-900 px-2 py-0.5 rounded font-bold text-[10px] border border-sky-200">
-                  Bảo mật Thống kê
-                </span>
+                {/* Đã xóa 2 biểu tượng theo yêu cầu trước */}
               </div>
               <p className="text-slate-500 font-medium leading-normal">
-                Cơ sở dữ liệu đám mây Firebase đồng bộ tự động dành cho nhập tin phiếu thu nhập cấp Xã.
+                
               </p>
             </div>
           </form>
         </div>
 
         <p className="text-xs text-sky-300/80 mt-6">
-          Hệ thống Quản lý Thống kê Thu nhập Hộ gia đình © 2026 - Cơ sở dữ liệu Firebase Firestore
+          Hệ thống Quản lý Thống kê Thu nhập Hộ gia đình © 2026
         </p>
       </div>
     );
@@ -4872,17 +4936,29 @@ export default function App() {
                 </p>
               </div>
 
-              {(selectedTkcs !== 'ALL' || selectedCommuneId !== 'ALL' || selectedAreaId !== 'ALL' || selectedSectorFilter !== 'ALL' || selectedSurveyorFilter !== 'ALL' || selectedStatusFilter !== 'ALL' || searchKeyword.trim() !== '' || onlyMyHouseholds) && (
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   type="button"
-                  onClick={handleResetFilters}
-                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors self-start md:self-auto"
-                  title="Bỏ toàn bộ các tiêu chí lọc để hiển thị danh sách đầy đủ toàn bộ hộ"
+                  onClick={() => setIsResetQuestionnaireModalOpen(true)}
+                  className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white rounded text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                  title="Xóa trắng / Reset dữ liệu phiếu điều tra theo địa bàn hoặc hộ (do nhập thử)"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Hiện tất cả {households.length} hộ</span>
+                  <span>Xóa trắng phiếu (Reset)</span>
                 </button>
-              )}
+
+                {(selectedTkcs !== 'ALL' || selectedCommuneId !== 'ALL' || selectedAreaId !== 'ALL' || selectedSectorFilter !== 'ALL' || selectedSurveyorFilter !== 'ALL' || selectedStatusFilter !== 'ALL' || searchKeyword.trim() !== '' || onlyMyHouseholds) && (
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                    title="Bỏ toàn bộ các tiêu chí lọc để hiển thị danh sách đầy đủ toàn bộ hộ"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Hiện tất cả {households.length} hộ</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Advanced Filters for Surveyor & Survey Status */}
@@ -5674,115 +5750,200 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="bg-black/20 px-3 py-1.5 rounded border border-white/20 text-xs font-bold text-white">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setTnhPivotMode(!tnhPivotMode)}
+                    className={`px-3 py-1.5 rounded font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
+                      tnhPivotMode 
+                        ? 'bg-amber-400 text-slate-950 ring-2 ring-amber-200' 
+                        : 'bg-teal-800 hover:bg-teal-700 text-white border border-teal-600'
+                    }`}
+                  >
+                    <span>{tnhPivotMode ? '📊 Dạng Chuẩn Theo Nhóm Ngành' : '🔄 Dạng Pivot (Hàng ngang là các xã)'}</span>
+                  </button>
+
+                  <span className="bg-teal-800 px-3 py-1.5 rounded border border-teal-600 text-xs font-bold text-white">
                     Phạm vi: <strong className="text-amber-300">{tnhScopeCommunes.length} xã</strong> | Mẫu: <strong className="text-emerald-300">{tnhSummary.totalAllocMau} hộ</strong> | Đã điều tra: <strong className="text-amber-300">{tnhSummary.totalSurveyedHH} hộ - {tnhSummary.totalMembers} người</strong>
                   </span>
                 </div>
               </div>
 
               {/* Table Body */}
-              <div className="overflow-x-auto">
-                <table className="w-full border-collapse text-xs text-slate-800 whitespace-nowrap">
-                  <thead>
-                    <tr className="bg-[#058da0] text-white text-center font-bold text-[11px]">
-                      <th className="border border-[#047484] p-2.5 w-12 bg-[#058da0]">STT</th>
-                      <th className="border border-[#047484] p-2.5 w-16 bg-[#058da0]">Mã loại</th>
-                      <th className="border border-[#047484] p-2.5 text-left min-w-[200px] bg-[#058da0]">Tên nhóm ngành nguồn thu lớn nhất</th>
-                      <th className="border border-[#047484] p-2.5 w-32 bg-[#047484] text-amber-200">
-                        Tổng số hộ trong bảng kê
-                      </th>
-                      <th className="border border-[#047484] p-2.5 w-28 bg-[#047484] text-cyan-100">
-                        Tỷ trọng cơ cấu %
-                      </th>
-                      <th className="border border-[#047484] p-2.5 w-32 bg-[#047484] text-emerald-200">
-                        Chỉ tiêu phân bổ mẫu chính thức
-                      </th>
-                      <th className="border border-[#047484] p-2.5 w-28 bg-[#058da0] text-white">
-                        Hộ điều tra thực tế
-                      </th>
-                      <th className="border border-[#047484] p-2.5 w-40 bg-[#035b69] text-emerald-100">
-                        TNBQ đầu người/tháng theo loại hộ (1.000 đ)
-                      </th>
-                      <th className="border border-[#047484] p-2.5 w-44 bg-[#02444e] text-amber-300 font-black">
-                        Suy rộng TNBQ (1.000 đ)
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tnhSummary.sectorData.map((s, idx) => (
-                      <tr key={s.code} className="odd:bg-white even:bg-[#f2fafb] hover:bg-[#e6f6f8] transition-colors">
-                        <td className="border border-slate-300 p-2.5 text-center text-slate-500">{idx + 1}</td>
-                        <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">{s.code}</td>
-                        <td className="border border-slate-300 p-2.5 font-bold text-slate-800">{s.name}</td>
-                        
-                        {/* 1. Tổng số hộ */}
-                        <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">
-                          {s.bkCount.toLocaleString()}
-                        </td>
+              <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+                {!tnhPivotMode ? (
+                  <table className="w-full border-collapse text-xs text-slate-800 whitespace-nowrap">
+                    <thead>
+                      <tr className="bg-[#058da0] text-white text-center font-bold text-[11px]">
+                        <th className="border border-[#047484] p-2.5 w-12 bg-[#058da0]">STT</th>
+                        <th className="border border-[#047484] p-2.5 w-16 bg-[#058da0]">Mã loại</th>
+                        <th className="border border-[#047484] p-2.5 text-left min-w-[200px] bg-[#058da0]">Tên nhóm ngành nguồn thu lớn nhất</th>
+                        <th className="border border-[#047484] p-2.5 w-32 bg-[#047484] text-amber-200">
+                          Tổng số hộ trong bảng kê
+                        </th>
+                        <th className="border border-[#047484] p-2.5 w-28 bg-[#047484] text-cyan-100">
+                          Tỷ trọng cơ cấu %
+                        </th>
+                        <th className="border border-[#047484] p-2.5 w-32 bg-[#047484] text-emerald-200">
+                          Chỉ tiêu phân bổ mẫu chính thức
+                        </th>
+                        <th className="border border-[#047484] p-2.5 w-28 bg-[#058da0] text-white">
+                          Hộ điều tra thực tế
+                        </th>
+                        <th className="border border-[#047484] p-2.5 w-40 bg-[#035b69] text-emerald-100">
+                          TNBQ đầu người/tháng theo loại hộ (1.000 đ)
+                        </th>
+                        <th className="border border-[#047484] p-2.5 w-44 bg-[#02444e] text-amber-300 font-black">
+                          Suy rộng TNBQ (1.000 đ)
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tnhSummary.sectorData.map((s, idx) => (
+                        <tr key={s.code} className="odd:bg-white even:bg-[#f2fafb] hover:bg-[#e6f6f8] transition-colors">
+                          <td className="border border-slate-300 p-2.5 text-center text-slate-500">{idx + 1}</td>
+                          <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">{s.code}</td>
+                          <td className="border border-slate-300 p-2.5 font-bold text-slate-800">{s.name}</td>
+                          
+                          {/* 1. Tổng số hộ */}
+                          <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">
+                            {s.bkCount.toLocaleString()}
+                          </td>
 
-                        {/* 2. Tỷ trọng cơ cấu */}
-                        <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">
-                          {s.percent}%
-                        </td>
+                          {/* 2. Tỷ trọng cơ cấu */}
+                          <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">
+                            {s.percent}%
+                          </td>
 
-                        {/* 3. Mẫu chính thức phân bổ */}
-                        <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">
-                          {s.mauAlloc}
-                        </td>
+                          {/* 3. Mẫu chính thức phân bổ */}
+                          <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">
+                            {s.mauAlloc}
+                          </td>
 
-                        {/* Số hộ điều tra thực tế */}
-                        <td className="border border-slate-300 p-2.5 text-center text-slate-800 font-medium">
-                          {s.surveyCount > 0 ? (
-                            <span>{s.surveyCount} hộ ({s.groupMembers} ng)</span>
-                          ) : (
-                            <span className="text-slate-400 italic">Chưa nạp</span>
-                          )}
-                        </td>
+                          {/* Số hộ điều tra thực tế */}
+                          <td className="border border-slate-300 p-2.5 text-center text-slate-800 font-medium">
+                            {s.surveyCount > 0 ? (
+                              <span>{s.surveyCount} hộ ({s.groupMembers} ng)</span>
+                            ) : (
+                              <span className="text-slate-400 italic">Chưa nạp</span>
+                            )}
+                          </td>
 
-                        {/* TNBQ đầu người/tháng theo loại hộ */}
-                        <td className="border border-slate-300 p-2.5 text-right font-bold text-slate-900">
-                          {s.perCapitaMonth > 0 ? `${s.perCapitaMonth.toLocaleString()} đ` : '0 đ'}
-                        </td>
+                          {/* TNBQ đầu người/tháng theo loại hộ */}
+                          <td className="border border-slate-300 p-2.5 text-right font-bold text-slate-900">
+                            {s.perCapitaMonth > 0 ? `${s.perCapitaMonth.toLocaleString()} đ` : '0 đ'}
+                          </td>
 
-                        {/* 4. Suy rộng TNBQ = Tỉ trọng cơ cấu * TNBQ đầu người/tháng theo loại hộ */}
-                        <td className="border border-slate-300 p-2.5 text-right font-black text-slate-900 text-sm">
-                          {s.extrapolatedIncomeYear > 0 ? `${s.extrapolatedIncomeYear.toLocaleString()} đ` : '0 đ'}
+                          {/* 4. Suy rộng TNBQ = Tỉ trọng cơ cấu * TNBQ đầu người/tháng theo loại hộ */}
+                          <td className="border border-slate-300 p-2.5 text-right font-black text-slate-900 text-sm">
+                            {s.extrapolatedIncomeYear > 0 ? `${s.extrapolatedIncomeYear.toLocaleString()} đ` : '0 đ'}
+                          </td>
+                        </tr>
+                      ))}
+
+                      {/* Dòng TỔNG TOÀN XÃ / TOÀN TKCS */}
+                      <tr className="bg-sky-100 font-black text-slate-900 border-t-2 border-sky-800">
+                        <td className="border border-slate-300 p-3 text-center" colSpan={3}>
+                          <div className="flex items-center justify-between">
+                            <span className="uppercase text-sky-950">TỔNG TOÀN BỘ PHẠM VI ĐANG XEM</span>
+                            <span className="text-xs bg-sky-800 text-white px-2 py-0.5 rounded font-bold">
+                              {tnhScopeCommunes.length} Xã
+                            </span>
+                          </div>
+                        </td>
+                        <td className="border border-slate-300 p-3 text-center text-slate-950 text-sm font-black bg-amber-100/60">
+                          {tnhSummary.totalBkHH.toLocaleString()}
+                        </td>
+                        <td className="border border-slate-300 p-3 text-center text-cyan-950 font-black bg-cyan-100/60">
+                          100.0%
+                        </td>
+                        <td className="border border-slate-300 p-3 text-center text-emerald-950 text-sm font-black bg-emerald-100/60">
+                          {tnhSummary.totalAllocMau.toLocaleString()}
+                        </td>
+                        <td className="border border-slate-300 p-3 text-center text-slate-900 font-black">
+                          {tnhSummary.totalSurveyedHH} / {tnhSummary.totalHH} hộ ({tnhSummary.totalMembers} ng)
+                        </td>
+                        <td className="border border-slate-300 p-3 text-right text-emerald-950 font-black bg-emerald-100/40" title={`${tnhSummary.totalMembers} nhân khẩu thực tế điều tra`}>
+                          {tnhSummary.overallDirectPerCapita.toLocaleString()} đ
+                        </td>
+                        <td className="border border-slate-300 p-3 text-right text-rose-950 text-base font-black bg-amber-200/80 shadow-inner">
+                          {tnhSummary.overallExtrapolated.toLocaleString()} đ
                         </td>
                       </tr>
-                    ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  /* PIVOT TABLE VIEW: ROWS ARE COMMUNES, COLUMNS ARE SECTORS & INCOME INDICATORS */
+                  <table className="w-full border-collapse text-xs text-slate-800 whitespace-nowrap">
+                    <thead>
+                      <tr className="bg-[#058da0] text-white text-center font-bold text-[11px]">
+                        <th className="border border-[#047484] p-2.5 w-12 bg-[#058da0]">STT</th>
+                        <th className="border border-[#047484] p-2.5 text-left min-w-[160px] bg-[#047484]">Tên Xã / Phường</th>
+                        <th className="border border-[#047484] p-2.5 w-20 bg-[#047484]">Mã xã</th>
+                        <th className="border border-[#047484] p-2.5 w-28 bg-[#047484] text-amber-200">Tổng BK (Hộ)</th>
+                        <th className="border border-[#047484] p-2.5 w-28 bg-[#047484] text-emerald-200">Mẫu (Hộ)</th>
+                        <th className="border border-[#047484] p-2.5 w-28 bg-[#058da0] text-white">Đã điều tra</th>
+                        <th className="border border-[#047484] p-2.5 w-32 bg-[#035b69] text-cyan-100">TNBQ NLTS (đ/tháng)</th>
+                        <th className="border border-[#047484] p-2.5 w-32 bg-[#035b69] text-cyan-100">TNBQ CNXD (đ/tháng)</th>
+                        <th className="border border-[#047484] p-2.5 w-32 bg-[#035b69] text-cyan-100">TNBQ TMDV (đ/tháng)</th>
+                        <th className="border border-[#047484] p-2.5 w-32 bg-[#035b69] text-cyan-100">TNBQ Khác (đ/tháng)</th>
+                        <th className="border border-[#047484] p-2.5 w-36 bg-[#02444e] text-amber-300 font-black">Suy rộng TNBQ (đ)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tnhScopeCommunes.map((c, idx) => {
+                        const oc = OFFICIAL_COMMUNES_CATALOG.find(item => item.communeCode === c.communeCode || item.id === c.id);
+                        const bkTot = c.bkTongSo ?? oc?.bkTongSo ?? 0;
+                        const mauTot = c.mauTongSo ?? oc?.mauTongSo ?? 0;
 
-                    {/* Dòng TỔNG TOÀN XÃ / TOÀN TKCS */}
-                    <tr className="bg-sky-100 font-black text-slate-900 border-t-2 border-sky-800">
-                      <td className="border border-slate-300 p-3 text-center" colSpan={3}>
-                        <div className="flex items-center justify-between">
-                          <span className="uppercase text-sky-950">TỔNG TOÀN BỘ PHẠM VI ĐANG XEM</span>
-                          <span className="text-xs bg-sky-800 text-white px-2 py-0.5 rounded font-bold">
-                            {tnhScopeCommunes.length} Xã
-                          </span>
-                        </div>
-                      </td>
-                      <td className="border border-slate-300 p-3 text-center text-slate-950 text-sm font-black bg-amber-100/60">
-                        {tnhSummary.totalBkHH.toLocaleString()}
-                      </td>
-                      <td className="border border-slate-300 p-3 text-center text-cyan-950 font-black bg-cyan-100/60">
-                        100.0%
-                      </td>
-                      <td className="border border-slate-300 p-3 text-center text-emerald-950 text-sm font-black bg-emerald-100/60">
-                        {tnhSummary.totalAllocMau.toLocaleString()}
-                      </td>
-                      <td className="border border-slate-300 p-3 text-center text-slate-900 font-black">
-                        {tnhSummary.totalSurveyedHH} / {tnhSummary.totalHH} hộ ({tnhSummary.totalMembers} ng)
-                      </td>
-                      <td className="border border-slate-300 p-3 text-right text-emerald-950 font-black bg-emerald-100/40" title={`${tnhSummary.totalMembers} nhân khẩu thực tế điều tra`}>
-                        {tnhSummary.overallDirectPerCapita.toLocaleString()} đ
-                      </td>
-                      <td className="border border-slate-300 p-3 text-right text-rose-950 text-base font-black bg-amber-200/80 shadow-inner">
-                        {tnhSummary.overallExtrapolated.toLocaleString()} đ
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+                        const cHouseholds = households.filter(h => h.communeId === c.id || h.communeCode === c.communeCode);
+                        const officialC = cHouseholds.filter(h => h.sampleStatus === 'CHÍNH THỨC' || !h.sampleStatus);
+                        const surveyedC = officialC.filter(h => isHouseholdSurveyed(h));
+
+                        const getSectorPerCapita = (sCode: number) => {
+                          const sList = surveyedC.filter(h => Number(h.sectorCode) === sCode);
+                          let inc = 0, mem = 0;
+                          sList.forEach(h => {
+                            inc += calculateHouseholdTotalIncome(h).total;
+                            mem += (Number(h.membersCount) || 1);
+                          });
+                          return mem > 0 ? Math.round(inc / mem / 12) : 0;
+                        };
+
+                        const p1 = getSectorPerCapita(1);
+                        const p2 = getSectorPerCapita(2);
+                        const p3 = getSectorPerCapita(3);
+                        const p4 = getSectorPerCapita(4);
+
+                        const tt1 = c.ttNongLamThuySan ?? oc?.ttNongLamThuySan ?? 25;
+                        const tt2 = c.ttCongNghiepXayDung ?? oc?.ttCongNghiepXayDung ?? 25;
+                        const tt3 = c.ttThuongMaiDichVu ?? oc?.ttThuongMaiDichVu ?? 25;
+                        const tt4 = c.ttThuKhacLuong ?? oc?.ttThuKhacLuong ?? 25;
+
+                        const sumW = (tt1 + tt2 + tt3 + tt4) || 100;
+                        const extYear = Math.round(((tt1 * p1 + tt2 * p2 + tt3 * p3 + tt4 * p4) / sumW));
+
+                        return (
+                          <tr key={c.id || c.communeCode} className="odd:bg-white even:bg-[#f2fafb] hover:bg-[#e6f6f8] transition-colors">
+                            <td className="border border-slate-300 p-2.5 text-center text-slate-500">{idx + 1}</td>
+                            <td className="border border-slate-300 p-2.5 font-bold text-slate-900">{c.communeName}</td>
+                            <td className="border border-slate-300 p-2.5 text-center font-mono text-slate-700">{c.communeCode}</td>
+                            <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">{bkTot.toLocaleString()}</td>
+                            <td className="border border-slate-300 p-2.5 text-center font-bold text-slate-900">{mauTot}</td>
+                            <td className="border border-slate-300 p-2.5 text-center font-medium text-slate-800">
+                              {surveyedC.length > 0 ? `${surveyedC.length} hộ` : <span className="text-slate-400 italic">0 hộ</span>}
+                            </td>
+                            <td className="border border-slate-300 p-2.5 text-right font-medium text-slate-800">{p1 > 0 ? `${p1.toLocaleString()} đ` : '---'}</td>
+                            <td className="border border-slate-300 p-2.5 text-right font-medium text-slate-800">{p2 > 0 ? `${p2.toLocaleString()} đ` : '---'}</td>
+                            <td className="border border-slate-300 p-2.5 text-right font-medium text-slate-800">{p3 > 0 ? `${p3.toLocaleString()} đ` : '---'}</td>
+                            <td className="border border-slate-300 p-2.5 text-right font-medium text-slate-800">{p4 > 0 ? `${p4.toLocaleString()} đ` : '---'}</td>
+                            <td className="border border-slate-300 p-2.5 text-right font-black text-slate-900 text-sm bg-amber-50">{extYear > 0 ? `${extYear.toLocaleString()} đ` : '0 đ'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </div>
 
@@ -7281,6 +7442,135 @@ export default function App() {
             </div>
             <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden mt-2">
               <div className="bg-rose-600 h-2 rounded-full animate-pulse w-full"></div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: XÓA TRẮNG / RESET PHIẾU ĐIỀU TRA THEO ĐỊA BÀN HOẶC HỘ */}
+      {isResetQuestionnaireModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-lg border border-slate-300 shadow-2xl max-w-lg w-full overflow-hidden text-xs">
+            <div className="bg-amber-600 text-white p-3.5 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="w-5 h-5 text-amber-200" />
+                <h3 className="font-bold text-sm">Xóa trắng / Reset Phiếu điều tra (Hộ nhập thử)</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsResetQuestionnaireModalOpen(false)}
+                className="text-white hover:bg-amber-700 p-1 rounded cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 flex flex-col gap-3.5 text-slate-700">
+              <p className="text-slate-600 leading-relaxed">
+                Tính năng này giúp xóa trắng nội dung phiếu (đưa về trạng thái chưa nhập ban đầu) cho các hộ do nhập thử nghiệm. Vui lòng chọn phạm vi cần reset:
+              </p>
+
+              <div className="flex flex-col gap-2.5">
+                <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800">
+                  <input
+                    type="radio"
+                    name="resetTargetType"
+                    value="area"
+                    checked={resetTargetType === 'area'}
+                    onChange={() => setResetTargetType('area')}
+                    className="cursor-pointer"
+                  />
+                  <span>Reset theo Địa bàn cụ thể</span>
+                </label>
+
+                {resetTargetType === 'area' && (
+                  <div className="pl-6 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <span className="block text-[11px] font-semibold text-slate-600 mb-1">Xã:</span>
+                      <select
+                        value={resetCommuneId}
+                        onChange={e => {
+                          setResetCommuneId(e.target.value);
+                          setResetAreaId('ALL');
+                        }}
+                        className="w-full bg-white border border-slate-300 rounded p-1.5 font-semibold text-slate-800 text-xs"
+                      >
+                        <option value="ALL">-- Tất cả các xã --</option>
+                        {communes.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.communeCode} - {c.communeName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <span className="block text-[11px] font-semibold text-slate-600 mb-1">Địa bàn:</span>
+                      <select
+                        value={resetAreaId}
+                        onChange={e => setResetAreaId(e.target.value)}
+                        className="w-full bg-white border border-slate-300 rounded p-1.5 font-semibold text-slate-800 text-xs"
+                      >
+                        <option value="ALL">-- Tất cả địa bàn trong xã --</option>
+                        {areas
+                          .filter(a => resetCommuneId === 'ALL' || a.communeId === resetCommuneId)
+                          .map(a => (
+                            <option key={a.id} value={a.id}>
+                              ĐB {a.code} - {a.name}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 mt-1">
+                  <input
+                    type="radio"
+                    name="resetTargetType"
+                    value="selected"
+                    checked={resetTargetType === 'selected'}
+                    onChange={() => setResetTargetType('selected')}
+                    className="cursor-pointer"
+                  />
+                  <span>Reset các hộ đang được tích chọn trên bảng ({selectedHouseholdIds.length} hộ)</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 mt-1">
+                  <input
+                    type="radio"
+                    name="resetTargetType"
+                    value="all_filtered"
+                    checked={resetTargetType === 'all_filtered'}
+                    onChange={() => setResetTargetType('all_filtered')}
+                    className="cursor-pointer"
+                  />
+                  <span>Reset toàn bộ danh sách hộ đang hiển thị ({filteredHouseholds.length} hộ)</span>
+                </label>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 rounded p-2.5 text-amber-900 text-[11px]">
+                ⚠️ <strong>Lưu ý:</strong> Hành động này sẽ xóa toàn bộ số liệu thu nhập đã nhập trong các biểu mẫu Phụ lục II của các hộ được chọn và đưa trạng thái về "Chưa nhập". Dữ liệu không thể khôi phục sau khi reset.
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200 mt-1">
+                <button
+                  type="button"
+                  onClick={() => setIsResetQuestionnaireModalOpen(false)}
+                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded font-bold cursor-pointer"
+                >
+                  Hủy bỏ
+                </button>
+                <button
+                  type="button"
+                  onClick={handleResetQuestionnaires}
+                  disabled={isResettingQuestionnaire}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded font-bold cursor-pointer shadow-xs flex items-center gap-1.5"
+                >
+                  {isResettingQuestionnaire && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Xác nhận xóa trắng phiếu</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
