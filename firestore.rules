@@ -19,7 +19,9 @@ service cloud.firestore {
     }
 
     function userData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) 
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data 
+        : {};
     }
 
     // Default deny all
@@ -29,40 +31,35 @@ service cloud.firestore {
 
     match /departments/{deptId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow write: if isSignedIn();
     }
 
     match /users/{userId} {
-      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow write: if isAdmin();
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
     }
 
-    // Communes - all authenticated users can read, admins can write
+    // Communes - all authenticated users can read/write
     match /communes/{communeId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow write: if isSignedIn();
     }
 
-    // Survey Areas - all authenticated users can read, admins/supervisors can write
+    // Survey Areas - all authenticated users can read/write
     match /surveyAreas/{areaId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin() || isSupervisor();
+      allow write: if isSignedIn();
     }
 
-    // Surveyors - authenticated users can read, admins can write
+    // Surveyors - authenticated users can read/write
     match /surveyors/{surveyorId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow write: if isSignedIn();
     }
 
-    // Households - authenticated users can read based on assignment, admins/supervisors can write
+    // Households - authenticated users can read, admins/supervisors can write
     match /households/{householdId} {
-      allow read: if isSignedIn() && (
-        isAdmin() ||
-        isSupervisor() ||
-        (userData().assignedAreas.hasAny(resource.data.assignedAreaIds) && !userData().assignedAreas.hasAny(['ALL'])) ||
-        userData().assignedAreas.hasAny(['ALL'])
-      );
+      allow read: if isSignedIn();
       allow create: if isAdmin() || isSupervisor();
       allow update: if isAdmin() || isSupervisor();
       allow delete: if isAdmin();
@@ -70,12 +67,8 @@ service cloud.firestore {
 
     // Example data collection
     match /surveys/{surveyId} {
-      allow read: if isSignedIn() && (
-        isAdmin() || 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedAreaCodes.hasAny(resource.data.areaCodes) ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.assignedAreaCodes.hasAny(['ALL'])
-      );
-      allow create: if isSignedIn(); // Needs more granular validation in real app
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
       allow update: if isAdmin();
     }
   }
