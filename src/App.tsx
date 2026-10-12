@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType, safeFirestoreWrite, isQuotaExceeded, auth } from './firebase';
 import { collection, getDocs, addDoc, deleteDoc, doc, setDoc, query, onSnapshot, writeBatch } from 'firebase/firestore';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, signInAnonymously } from 'firebase/auth';
 
 import { FullQuestionnaire, createDefaultQuestionnaire } from './types/questionnaire';
 import { calculateFullIncome } from './utils/incomeCalculator';
@@ -187,6 +187,9 @@ export default function App() {
   const [showChangePasswordModal, setShowChangePasswordModal] = useState<boolean>(false);
 
   useEffect(() => {
+    // Sign in anonymously to get Firebase Auth uid for Firestore rules
+    signInAnonymously(auth).catch(console.error);
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
         setIsLoggedIn(true);
