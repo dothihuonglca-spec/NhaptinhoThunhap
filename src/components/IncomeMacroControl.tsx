@@ -379,7 +379,7 @@ export const IncomeMacroControl: React.FC<IncomeMacroControlProps> = ({
               </h2>
             </div>
             <p className="text-xs text-teal-200 mt-1">
-              Liên kết đồng bộ 104 Xã/Phường • Dân số toàn tỉnh 3,256,389 người • Đối soát vĩ mô & suy rộng quỹ thu nhập
+              Liên kết đồng bộ 104 Xã/Phường • Dân số toàn tỉnh 3,256,389 người • Suy rộng quỹ thu nhập
             </p>
           </div>
 
@@ -419,7 +419,7 @@ export const IncomeMacroControl: React.FC<IncomeMacroControlProps> = ({
 
           <div className="bg-white/10 backdrop-blur-xs rounded-lg p-3 border border-white/10">
             <div className="flex items-center justify-between text-sky-300 text-xs font-semibold mb-1">
-              <span className="flex items-center gap-1.5"><Coins className="w-3.5 h-3.5" /> Tổng Quỹ Thu Nhập Năm</span>
+              <span className="flex items-center gap-1.5"><Coins className="w-3.5 h-3.5" /> Tổng Thu Nhập Địa Phương Năm </span>
               <span className="text-[10px] bg-sky-800/80 px-1.5 py-0.2 rounded text-sky-100">Quy mô năm</span>
             </div>
             <div className="text-xl md:text-2xl font-black text-sky-200">
@@ -429,7 +429,7 @@ export const IncomeMacroControl: React.FC<IncomeMacroControlProps> = ({
 
           <div className="bg-white/10 backdrop-blur-xs rounded-lg p-3 border border-white/10">
             <div className="flex items-center justify-between text-purple-300 text-xs font-semibold mb-1">
-              <span className="flex items-center gap-1.5"><Coins className="w-3.5 h-3.5" /> Tổng Quỹ Thu Nhập Tháng</span>
+              <span className="flex items-center gap-1.5"><Coins className="w-3.5 h-3.5" /> Tổng Thu Nhập Địa Phương Tháng </span>
               <span className="text-[10px] bg-purple-800/80 px-1.5 py-0.2 rounded text-purple-100">Quy mô tháng</span>
             </div>
             <div className="text-xl md:text-2xl font-black text-purple-200">

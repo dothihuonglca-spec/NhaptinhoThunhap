@@ -5797,32 +5797,32 @@ export default function App() {
                   </table>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 p-4 items-start">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 p-4 items-stretch">
                   {/* Left: Summary Table */}
-                  <div className="lg:col-span-7 overflow-x-auto max-h-[500px] overflow-y-auto border border-slate-300 rounded-lg shadow-inner bg-white">
-                    <table className="w-full border-collapse text-xs text-slate-800 whitespace-nowrap">
+                  <div className="lg:col-span-8 border border-slate-300 rounded-lg shadow-inner bg-white flex flex-col justify-between">
+                    <table className="w-full border-collapse text-xs text-slate-800">
                       <thead>
                         <tr className="bg-[#058da0] text-white text-center font-bold text-[11px]">
-                          <th className="border border-[#047484] p-2.5 w-12 bg-[#058da0]">STT</th>
-                          <th className="border border-[#047484] p-2.5 w-16 bg-[#058da0]">Mã loại</th>
-                          <th className="border border-[#047484] p-2.5 text-left min-w-[200px] bg-[#058da0]">Tên nhóm ngành nguồn thu lớn nhất</th>
-                          <th className="border border-[#047484] p-2.5 w-32 bg-[#047484] text-amber-200">
-                            Tổng số hộ trong bảng kê
+                          <th className="border border-[#047484] p-2.5 w-10 bg-[#058da0]">STT</th>
+                          <th className="border border-[#047484] p-2.5 w-14 bg-[#058da0]">Mã</th>
+                          <th className="border border-[#047484] p-2.5 text-left bg-[#058da0]">Tên nhóm ngành nguồn thu lớn nhất</th>
+                          <th className="border border-[#047484] p-2.5 w-24 bg-[#047484] text-amber-200">
+                            Tổng số hộ
                           </th>
-                          <th className="border border-[#047484] p-2.5 w-28 bg-[#047484] text-cyan-100">
-                            Tỷ trọng cơ cấu %
+                          <th className="border border-[#047484] p-2.5 w-20 bg-[#047484] text-cyan-100">
+                            Tỷ trọng
                           </th>
-                          <th className="border border-[#047484] p-2.5 w-32 bg-[#047484] text-emerald-200">
-                            Chỉ tiêu phân bổ mẫu chính thức
+                          <th className="border border-[#047484] p-2.5 w-24 bg-[#047484] text-emerald-200">
+                            Mẫu phân bổ
                           </th>
-                          <th className="border border-[#047484] p-2.5 w-28 bg-[#058da0] text-white">
-                            Hộ điều tra thực tế
+                          <th className="border border-[#047484] p-2.5 w-24 bg-[#058da0] text-white">
+                            Hộ ĐT
                           </th>
-                          <th className="border border-[#047484] p-2.5 w-40 bg-[#035b69] text-emerald-100">
-                            TNBQ đầu người/tháng theo loại hộ (1.000 đ)
+                          <th className="border border-[#047484] p-2.5 w-28 bg-[#035b69] text-emerald-100">
+                            TNBQ/tháng
                           </th>
-                          <th className="border border-[#047484] p-2.5 w-44 bg-[#02444e] text-amber-300 font-black">
-                            Suy rộng TNBQ (1.000 đ)
+                          <th className="border border-[#047484] p-2.5 w-32 bg-[#02444e] text-amber-300 font-black">
+                            Suy rộng
                           </th>
                         </tr>
                       </thead>
@@ -5902,59 +5902,74 @@ export default function App() {
                     </table>
                   </div>
 
-                  {/* Right: Visual Chart Panel */}
-                  <div className="lg:col-span-5 bg-slate-50 border border-slate-300 rounded-lg p-4 flex flex-col gap-4 shadow-inner">
-                    <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                      <h4 className="font-extrabold text-slate-800 text-xs uppercase flex items-center gap-1.5">
-                        <BarChart3 className="w-4 h-4 text-teal-700" />
-                        <span>Biểu đồ tỷ trọng & TNBQ theo nhóm ngành</span>
-                      </h4>
-                      <span className="text-[11px] bg-teal-100 text-teal-950 font-bold px-2 py-0.5 rounded">
-                        {tnhScopeCommunes.length} Xã
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col gap-3">
-                      {tnhSummary.sectorData.map((s, idx) => {
-                        const colors = ['bg-emerald-600', 'bg-sky-600', 'bg-amber-500', 'bg-purple-600'];
-                        const barColor = colors[idx % colors.length];
-
-                        return (
-                          <div key={s.code} className="bg-white p-3 rounded-md border border-slate-200 shadow-2xs flex flex-col gap-1.5">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="font-bold text-slate-900 truncate max-w-[220px]" title={s.name}>
-                                {s.code}. {s.name}
-                              </span>
-                              <div className="flex items-center gap-2">
-                                <span className="font-extrabold text-teal-800">{s.percent}%</span>
-                                <span className="text-slate-500 text-[11px]">({s.mauAlloc} mẫu)</span>
-                              </div>
-                            </div>
-
-                            <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
-                              <div 
-                                className={`h-2.5 rounded-full ${barColor} transition-all duration-500`}
-                                style={{ width: `${Math.max(5, Number(s.percent))}%` }}
-                              />
-                            </div>
-
-                            <div className="flex items-center justify-between text-[11px] text-slate-600 pt-1 border-t border-slate-100">
-                              <span>Bảng kê: <strong>{s.bkCount.toLocaleString()}</strong> hộ</span>
-                              <span className="font-bold text-slate-900">Suy rộng: {s.extrapolatedIncomeYear.toLocaleString()} đ</span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <div className="bg-teal-900 text-white p-3 rounded-md flex flex-col gap-1 text-xs mt-auto">
-                      <span className="text-teal-200 text-[11px] font-bold">TNBQ bình quân toàn bộ phạm vi đang xem:</span>
-                      <div className="text-base font-black text-amber-300">
-                        {tnhSummary.overallExtrapolated.toLocaleString()} đ <span className="text-xs font-normal text-white">/người/năm</span>
+                  {/* Right: Visual Column Chart Panel */}
+                  <div className="lg:col-span-4 bg-slate-50 border border-slate-300 rounded-lg p-4 flex flex-col justify-between shadow-inner h-full">
+                    <div>
+                      <div className="flex items-center justify-between border-b border-slate-200 pb-2 mb-3">
+                        <h4 className="font-extrabold text-slate-800 text-xs uppercase flex items-center gap-1.5">
+                          <BarChart3 className="w-4 h-4 text-teal-700" />
+                          <span>Biểu đồ TNBQ & Suy Rộng</span>
+                        </h4>
+                        <span className="text-[11px] bg-teal-100 text-teal-950 font-bold px-2 py-0.5 rounded">
+                          {tnhScopeCommunes.length} Xã
+                        </span>
                       </div>
-                      <span className="text-[10px] text-teal-300">
-                        Đã điều tra: {tnhSummary.totalSurveyedHH} / {tnhSummary.totalHH} hộ ({tnhSummary.totalMembers} nhân khẩu)
-                      </span>
+
+                      {/* Column Chart Visual Container */}
+                      <div className="bg-white p-3 rounded-lg border border-slate-200 shadow-2xs flex flex-col gap-3">
+                        <div className="flex items-center justify-center gap-4 text-xs font-semibold text-slate-700 border-b border-slate-100 pb-2">
+                          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 bg-teal-600 rounded-xs inline-block"></span> TNBQ/tháng</span>
+                          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 bg-amber-500 rounded-xs inline-block"></span> Suy rộng (năm)</span>
+                        </div>
+
+                        <div className="flex items-end justify-between gap-1.5 h-44 pt-6 px-1 border-b border-slate-200">
+                          {(() => {
+                            const maxExt = Math.max(...tnhSummary.sectorData.map(item => item.extrapolatedIncomeYear), 1);
+                            const maxTnbq = Math.max(...tnhSummary.sectorData.map(item => item.perCapitaMonth), 1);
+
+                            return tnhSummary.sectorData.map((s) => {
+                              const tnbqHeight = s.perCapitaMonth > 0 ? Math.max(6, Math.round((s.perCapitaMonth / maxTnbq) * 100)) : 0;
+                              const extHeight = s.extrapolatedIncomeYear > 0 ? Math.max(6, Math.round((s.extrapolatedIncomeYear / maxExt) * 100)) : 0;
+                              const shortName = s.code === 1 ? 'Nông lâm' : s.code === 2 ? 'Công nghiệp' : s.code === 3 ? 'Thương mại' : 'Khác';
+
+                              return (
+                                <div key={s.code} className="flex-1 flex flex-col items-center gap-1 h-full justify-end group">
+                                  <div className="flex items-end justify-center gap-0.5 w-full h-full">
+                                    {/* TNBQ Column */}
+                                    <div 
+                                      className="w-2.5 bg-teal-600 rounded-t transition-all duration-500 group-hover:bg-teal-500 relative flex flex-col items-center"
+                                      style={{ height: `${tnbqHeight}%` }}
+                                      title={`${s.name} - TNBQ: ${s.perCapitaMonth.toLocaleString()} đ/tháng`}
+                                    >
+                                      {s.perCapitaMonth > 0 && (
+                                        <span className="absolute -top-5 text-[9px] font-bold text-teal-800 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                                          {Math.round(s.perCapitaMonth / 1000)}k
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Suy rộng Column */}
+                                    <div 
+                                      className="w-2.5 bg-amber-500 rounded-t transition-all duration-500 group-hover:bg-amber-400 relative flex flex-col items-center"
+                                      style={{ height: `${extHeight}%` }}
+                                      title={`${s.name} - Suy rộng: ${s.extrapolatedIncomeYear.toLocaleString()} đ/năm`}
+                                    >
+                                      {s.extrapolatedIncomeYear > 0 && (
+                                        <span className="absolute -top-5 text-[9px] font-bold text-amber-800 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                                          {Math.round(s.extrapolatedIncomeYear / 1000000)}tr
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <span className="text-[9px] font-bold text-slate-800 text-center mt-1 leading-tight whitespace-normal w-full" title={s.name}>
+                                    {s.code}. {shortName}
+                                  </span>
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
