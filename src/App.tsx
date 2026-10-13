@@ -180,7 +180,7 @@ export default function App() {
   const [currentSurveyorId, setCurrentSurveyorId] = useState<string>('admin');
   const [loading, setLoading] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
-  const [ignoreFirestoreSync, setIgnoreFirestoreSync] = useState<boolean>(false);
+  const ignoreFirestoreSync = useRef<boolean>(false);
   
   // Real Login & Authentication States
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
@@ -410,7 +410,7 @@ export default function App() {
     }
 
     const unsubCommunes = onSnapshot(collection(db, 'communes'), (snapshot) => {
-      if (ignoreFirestoreSync) return;
+      if (ignoreFirestoreSync.current) return;
       const existingComs: Commune[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Commune));
       if (snapshot.empty || existingComs.length === 0) {
         setCommunes(OFFICIAL_COMMUNES_CATALOG);
@@ -468,7 +468,7 @@ export default function App() {
     });
 
     const unsubAreas = onSnapshot(collection(db, 'surveyAreas'), (snapshot) => {
-      if (ignoreFirestoreSync) return;
+      if (ignoreFirestoreSync.current) return;
       const ars: SurveyArea[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as SurveyArea));
       if (ars.length > 0) {
         setAreas(ars);
@@ -488,7 +488,7 @@ export default function App() {
     });
 
     const unsubSurveyors = onSnapshot(collection(db, 'surveyors'), (snapshot) => {
-      if (ignoreFirestoreSync) return;
+      if (ignoreFirestoreSync.current) return;
       const existingSurs: Surveyor[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Surveyor));
       if (snapshot.empty || existingSurs.length === 0) {
         const adminUser = DEFAULT_SURVEYORS[0];
@@ -510,7 +510,7 @@ export default function App() {
     });
 
     const unsubHouseholds = onSnapshot(collection(db, 'households'), (snapshot) => {
-      if (ignoreFirestoreSync) return;
+      if (ignoreFirestoreSync.current) return;
       const hhs: Household[] = snapshot.docs.map(d => {
         const data = d.data() as any;
         let mem = Number(data.membersCount);
@@ -563,7 +563,7 @@ export default function App() {
     });
 
     const unsubDepartments = onSnapshot(collection(db, 'departments'), (snapshot) => {
-      if (ignoreFirestoreSync) return;
+      if (ignoreFirestoreSync.current) return;
       const existingDepts: Department[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Department));
       if (snapshot.empty || existingDepts.length === 0) {
         setDepartments(OFFICIAL_5_DEPARTMENTS);
@@ -1250,7 +1250,7 @@ export default function App() {
     }
 
     // 2. Background Firestore write
-    setIgnoreFirestoreSync(true); // Block listeners during sync
+    ignoreFirestoreSync.current = true; // Block listeners during sync (immediate)
     setTimeout(async () => {
       try {
         if (isOverwrite) {
@@ -1288,9 +1288,15 @@ export default function App() {
           await batch.commit();
         }
       } catch (bgErr) {
-        console.warn("Background Firebase sync warning:", bgErr);
+        console.error("🔥 Background write FAILED:", bgErr); // DEBUG
       } finally {
-        setIgnoreFirestoreSync(false); // Re-enable listeners after sync
+        // DEBUG: Verify write
+        try {
+          const verifyHhs = await getDocs(collection(db, 'households'));
+          const verifyAreas = await getDocs(collection(db, 'surveyAreas'));
+          console.log('🔥 Verify - households:', verifyHhs.size, 'areas:', verifyAreas.size);
+        } catch (e) {}
+        ignoreFirestoreSync.current = false; // Re-enable listeners after sync
       }
     }, 100);
   };
