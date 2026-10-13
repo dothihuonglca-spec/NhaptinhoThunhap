@@ -3033,16 +3033,15 @@ export default function App() {
 
     const targetArea = areas.find(a => a.id === areaIdOrCode || a.code === areaIdOrCode);
 
+    // Matching linh hoạt: ưu tiên areaId (đầy đủ), fallback areaCode
+    const getAreaKey = (h: any) => h.areaId || `code-${h.areaCode}-${h.communeId || h.communeCode || ''}`;
+    const targetAreaKey = targetArea ? getAreaKey(targetArea) : areaIdOrCode;
+
     const updatedHouseholds = households.map(h => {
-      const isMatch = targetArea
-        ? (h.areaId === targetArea.id || (h.areaCode === targetArea.code && (h.communeId === targetArea.communeId || (h as any).communeCode === targetArea.communeCode)))
-        : (h.areaId === areaIdOrCode || h.areaCode === areaIdOrCode);
+      const hKey = getAreaKey(h);
+      const isMatch = hKey === targetAreaKey || h.areaId === areaIdOrCode || h.areaCode === (targetArea?.code || areaIdOrCode);
       if (isMatch) {
-        return {
-          ...h,
-          assignedSurveyorId: targetSurveyor.id,
-          assignedSurveyorName: targetSurveyor.name
-        };
+        return { ...h, assignedSurveyorId: targetSurveyor.id, assignedSurveyorName: targetSurveyor.name };
       }
       return h;
     });
@@ -3050,35 +3049,23 @@ export default function App() {
     setHouseholds(updatedHouseholds);
     try { localStorage.setItem('cached_households', JSON.stringify(updatedHouseholds)); } catch (e) {}
 
-    // Cập nhật assignedAreas của Điều tra viên (loại bỏ 001 nếu có)
+    // Cập nhật assignedAreas của Điều tra viên
     const areaIdToAssign = targetArea ? targetArea.id : areaIdOrCode;
     const prevAssigned = targetSurveyor.assignedAreas || [];
     const cleanedAssigned = Array.from(new Set([...prevAssigned.filter(item => item !== '001'), areaIdToAssign]));
-    const updatedSurveyor: Surveyor = {
-      ...targetSurveyor,
-      assignedAreas: cleanedAssigned,
-      updatedAt: new Date().toISOString()
-    };
+    const updatedSurveyor: Surveyor = { ...targetSurveyor, assignedAreas: cleanedAssigned, updatedAt: new Date().toISOString() };
     await handleSaveSurveyor(updatedSurveyor);
 
-    // Batch update Firestore
-    try {
-      const matching = updatedHouseholds.filter(h => targetArea
-        ? (h.areaId === targetArea.id || (h.areaCode === targetArea.code && (h.communeId === targetArea.communeId || (h as any).communeCode === targetArea.communeCode)))
-        : (h.areaId === areaIdOrCode || h.areaCode === areaIdOrCode));
-      for (let i = 0; i < matching.length; i += 300) {
-        const chunk = matching.slice(i, i + 300);
-        const batch = writeBatch(db);
-        chunk.forEach(h => {
-          batch.update(doc(db, 'households', h.id), {
-            assignedSurveyorId: targetSurveyor.id,
-            assignedSurveyorName: targetSurveyor.name
-          });
-        });
-        await batch.commit();
-      }
-    } catch (e) {
-      console.warn("Batch assign area sync notice:", e);
+    // Batch update Firestore với safeFirestoreWrite (có timeout)
+    const matching = updatedHouseholds.filter(h => {
+      const hKey = getAreaKey(h);
+      return hKey === targetAreaKey || h.areaId === areaIdOrCode || h.areaCode === (targetArea?.code || areaIdOrCode);
+    });
+    for (let i = 0; i < matching.length; i += 300) {
+      const chunk = matching.slice(i, i + 300);
+      const batch = writeBatch(db);
+      chunk.forEach(h => batch.update(doc(db, 'households', h.id), { assignedSurveyorId: targetSurveyor.id, assignedSurveyorName: targetSurveyor.name }));
+      await safeFirestoreWrite(() => batch.commit());
     }
   };
 
