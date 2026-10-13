@@ -243,8 +243,8 @@ export default function SurveyorManagement({
     setFormAllAreas(s.assignedAreas.includes('ALL'));
     const matchedIds = areas.filter(a => 
       s.assignedAreas.includes(a.id) || 
-      s.assignedAreas.includes(`${a.communeId}_${a.code}`) ||
-      ((a as any).communeCode && s.assignedAreas.includes(`${(a as any).communeCode}_${a.code}`)) ||
+      s.assignedAreas.includes(`${a.communeId}-${a.code}`) ||
+      ((a as any).communeCode && s.assignedAreas.includes(`${(a as any).communeCode}-${a.code}`)) ||
       households.some(h => (h.assignedSurveyorId === s.id || h.assignedSurveyorName === s.name) && (h.areaId === a.id || h.areaCode === a.code)) ||
       (s.assignedAreas.includes(a.code) && (areas.filter(x => x.code === a.code).length === 1 || (s.assignedCommunes && (s.assignedCommunes.includes(a.communeId) || ((a as any).communeCode && s.assignedCommunes.includes((a as any).communeCode))))))
     ).map(a => a.id);
