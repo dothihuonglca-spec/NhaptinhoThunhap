@@ -1193,7 +1193,7 @@ export default function App() {
     isOverwrite: boolean,
     oldCommuneIdsToRemove: string[] = []
   ) => {
-    setUploadProgressText(`Đang lưu ${totalCount} hộ từ ${areasData.length} địa bàn...`);
+    setUploadProgressText(`Đang lưu ${totalCount} hộ từ ${areasData.length} địa bàn lên cơ sở dữ liệu...`);
 
     // Ensure all matching old commune IDs by ID, code, or name are collected if isOverwrite
     const allIdsToRemove = new Set(oldCommuneIdsToRemove);
@@ -1210,7 +1210,52 @@ export default function App() {
       });
     }
 
-    // 1. Update State & LocalStorage immediately
+    const preparedAreasData: SurveyArea[] = areasData.map(a => ({
+      ...a,
+      communeCode: a.communeCode || communeData.communeCode
+    }));
+
+    try {
+      // 1. Write to Firestore FIRST and await to ensure no race condition with onSnapshot
+      if (isOverwrite) {
+        const oldAreas = areas.filter(a => allIdsToRemove.has(a.communeId) || a.communeId === communeData.id);
+        const oldHhs = households.filter(h => 
+          allIdsToRemove.has(h.communeId) || 
+          h.communeId === communeData.id || 
+          (communeData.communeCode && h.communeCode && h.communeCode.trim().toLowerCase() === communeData.communeCode.trim().toLowerCase()) ||
+          (communeData.communeName && h.communeName && h.communeName.trim().toLowerCase() === communeData.communeName.trim().toLowerCase())
+        );
+        const toDeleteRefs = [
+          ...Array.from(allIdsToRemove).map(id => doc(db, 'communes', id)),
+          ...oldAreas.map(a => doc(db, 'surveyAreas', a.id)),
+          ...oldHhs.map(h => doc(db, 'households', h.id))
+        ];
+
+        for (let i = 0; i < toDeleteRefs.length; i += 300) {
+          const chunk = toDeleteRefs.slice(i, i + 300);
+          const batch = writeBatch(db);
+          chunk.forEach(r => batch.delete(r));
+          await batch.commit();
+        }
+      }
+
+      const allDocs = [
+        { ref: doc(db, 'communes', communeData.id), data: communeData },
+        ...preparedAreasData.map(a => ({ ref: doc(db, 'surveyAreas', a.id), data: a })),
+        ...householdsData.map(h => ({ ref: doc(db, 'households', h.id), data: h }))
+      ];
+
+      for (let i = 0; i < allDocs.length; i += 300) {
+        const chunk = allDocs.slice(i, i + 300);
+        const batch = writeBatch(db);
+        chunk.forEach(item => batch.set(item.ref, item.data));
+        await batch.commit();
+      }
+    } catch (bgErr) {
+      console.warn("Firebase sync error during import:", bgErr);
+    }
+
+    // 2. Then Update State & LocalStorage immediately after successful DB write
     setCommunes(prev => {
       let next: Commune[];
       if (isOverwrite) {
@@ -1221,11 +1266,6 @@ export default function App() {
       try { localStorage.setItem('cached_communes', JSON.stringify(next)); } catch (e) {}
       return next;
     });
-
-    const preparedAreasData: SurveyArea[] = areasData.map(a => ({
-      ...a,
-      communeCode: a.communeCode || communeData.communeCode
-    }));
 
     setAreas(prev => {
       let next: SurveyArea[];
@@ -1271,57 +1311,15 @@ export default function App() {
         skippedSheets: skippedSheetsList
       });
       showNotification('success', isOverwrite 
-        ? `Đã GHI ĐÈ thành công xã [${communeData.communeCode}] ${communeData.communeName}: ${totalCount} hộ (${areasData.length} địa bàn). Đang đồng bộ lên Firebase ở nền...`
-        : `Đã nạp thành công ${totalCount} hộ (${areasData.length} địa bàn). Đang đồng bộ lên Firebase ở nền...`
+        ? `Đã GHI ĐÈ thành công xã [${communeData.communeCode}] ${communeData.communeName}: ${totalCount} hộ (${areasData.length} địa bàn) và đồng bộ xong lên Firebase!`
+        : `Đã nạp thành công ${totalCount} hộ (${areasData.length} địa bàn) và đồng bộ xong lên Firebase!`
       );
     } else {
       showNotification('success', isOverwrite 
-        ? `Đã GHI ĐÈ thành công dữ liệu xã [${communeData.communeCode}] ${communeData.communeName} (${areasData.length} địa bàn, ${totalCount} hộ). Đang đồng bộ lên Firebase ở nền...`
-        : `Đã import thành công ${totalCount} hộ. Đang đồng bộ lên Firebase ở nền...`
+        ? `Đã GHI ĐÈ thành công dữ liệu xã [${communeData.communeCode}] ${communeData.communeName} (${areasData.length} địa bàn, ${totalCount} hộ) và đồng bộ xong lên Firebase!`
+        : `Đã import thành công ${totalCount} hộ và đồng bộ xong lên Firebase!`
       );
     }
-
-    // 2. Background Firestore write
-    setTimeout(async () => {
-      try {
-        if (isOverwrite) {
-          const oldAreas = areas.filter(a => allIdsToRemove.has(a.communeId) || a.communeId === communeData.id);
-          const oldHhs = households.filter(h => 
-            allIdsToRemove.has(h.communeId) || 
-            h.communeId === communeData.id || 
-            (communeData.communeCode && h.communeCode && h.communeCode.trim().toLowerCase() === communeData.communeCode.trim().toLowerCase()) ||
-            (communeData.communeName && h.communeName && h.communeName.trim().toLowerCase() === communeData.communeName.trim().toLowerCase())
-          );
-          const toDeleteRefs = [
-            ...Array.from(allIdsToRemove).map(id => doc(db, 'communes', id)),
-            ...oldAreas.map(a => doc(db, 'surveyAreas', a.id)),
-            ...oldHhs.map(h => doc(db, 'households', h.id))
-          ];
-
-          for (let i = 0; i < toDeleteRefs.length; i += 300) {
-            const chunk = toDeleteRefs.slice(i, i + 300);
-            const batch = writeBatch(db);
-            chunk.forEach(r => batch.delete(r));
-            await batch.commit();
-          }
-        }
-
-        const allDocs = [
-          { ref: doc(db, 'communes', communeData.id), data: communeData },
-          ...areasData.map(a => ({ ref: doc(db, 'surveyAreas', a.id), data: a })),
-          ...householdsData.map(h => ({ ref: doc(db, 'households', h.id), data: h }))
-        ];
-
-        for (let i = 0; i < allDocs.length; i += 300) {
-          const chunk = allDocs.slice(i, i + 300);
-          const batch = writeBatch(db);
-          chunk.forEach(item => batch.set(item.ref, item.data));
-          await batch.commit();
-        }
-      } catch (bgErr) {
-        console.warn("Background Firebase sync warning:", bgErr);
-      }
-    }, 100);
   };
 
   const handleConfirmOverwriteCommune = async () => {
