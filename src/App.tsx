@@ -819,14 +819,14 @@ export default function App() {
       if (currentUser.assignedCommunes && !currentUser.assignedCommunes.includes('ALL')) {
         return communes.filter(c => currentUser.assignedCommunes?.includes(c.id) || currentUser.assignedCommunes?.includes(c.communeCode));
       }
-    } else if (currentUser.role === 'SURVEYOR') {
+} else if (currentUser.role === 'SURVEYOR') {
       if (!currentUser.assignedAreas.includes('ALL')) {
         const myCommuneIds = new Set(areas.filter(a => 
-         currentUser.assignedAreas.includes('ALL') || 
-         currentUser.assignedAreas.includes(a.id) || 
-         currentUser.assignedAreas.includes(a.code) || 
-         currentUser.assignedAreas.includes(`${a.communeId}_${a.code}`)
-       ).map(a => a.communeId));
+          currentUser.assignedAreas.includes('ALL') || 
+          currentUser.assignedAreas.includes(a.id) || 
+          currentUser.assignedAreas.includes(a.code) || 
+          currentUser.assignedAreas.includes(`${a.communeId}-${a.code}`)
+        ).map(a => a.communeId));
         return communes.filter(c => myCommuneIds.has(c.id) || myCommuneIds.has(c.communeCode));
       }
     }
@@ -848,7 +848,7 @@ export default function App() {
             currentUser.assignedAreas.includes('ALL') || 
             currentUser.assignedAreas.includes(a.id) || 
             currentUser.assignedAreas.includes(a.code) || 
-            currentUser.assignedAreas.includes(`${a.communeId}_${a.code}`)
+            currentUser.assignedAreas.includes(`${a.communeId}-${a.code}`)
           );
         }
       } else if (currentUser.role === 'SUPERVISOR') {
@@ -1252,6 +1252,7 @@ export default function App() {
     // 2. Background Firestore write
     ignoreFirestoreSync.current = true; // Block listeners during sync (immediate)
     setTimeout(async () => {
+      let writeSuccess = true;
       try {
         if (isOverwrite) {
           const oldAreas = areas.filter(a => allIdsToRemove.has(a.communeId) || a.communeId === communeData.id);
@@ -1271,31 +1272,43 @@ export default function App() {
             const chunk = toDeleteRefs.slice(i, i + 300);
             const batch = writeBatch(db);
             chunk.forEach(r => batch.delete(r));
-            await batch.commit();
+            const result = await safeFirestoreWrite(() => batch.commit());
+            if (result === null) { writeSuccess = false; break; }
           }
         }
 
-        const allDocs = [
-          { ref: doc(db, 'communes', communeData.id), data: communeData },
-          ...areasData.map(a => ({ ref: doc(db, 'surveyAreas', a.id), data: a })),
-          ...householdsData.map(h => ({ ref: doc(db, 'households', h.id), data: h }))
-        ];
+        if (writeSuccess) {
+          const allDocs = [
+            { ref: doc(db, 'communes', communeData.id), data: communeData },
+            ...areasData.map(a => ({ ref: doc(db, 'surveyAreas', a.id), data: a })),
+            ...householdsData.map(h => ({ ref: doc(db, 'households', h.id), data: h }))
+          ];
 
-        for (let i = 0; i < allDocs.length; i += 300) {
-          const chunk = allDocs.slice(i, i + 300);
-          const batch = writeBatch(db);
-          chunk.forEach(item => batch.set(item.ref, item.data));
-          await batch.commit();
+          for (let i = 0; i < allDocs.length; i += 300) {
+            const chunk = allDocs.slice(i, i + 300);
+            const batch = writeBatch(db);
+            chunk.forEach(item => batch.set(item.ref, item.data));
+            const result = await safeFirestoreWrite(() => batch.commit());
+            if (result === null) { writeSuccess = false; break; }
+          }
         }
       } catch (bgErr) {
-        console.error("🔥 Background write FAILED:", bgErr); // DEBUG
+        console.error("🔥 Background write FAILED:", bgErr);
+        writeSuccess = false;
       } finally {
-        // DEBUG: Verify write
+        // Verify write
         try {
           const verifyHhs = await getDocs(collection(db, 'households'));
           const verifyAreas = await getDocs(collection(db, 'surveyAreas'));
           console.log('🔥 Verify - households:', verifyHhs.size, 'areas:', verifyAreas.size);
-        } catch (e) {}
+          if (writeSuccess && verifyHhs.size > 0) {
+            showNotification('success', `Đã đồng bộ thành công ${verifyHhs.size} hộ, ${verifyAreas.size} địa bàn lên Firebase.`);
+          } else if (!writeSuccess) {
+            showNotification('error', 'Đồng bộ Firebase thất bại! Dữ liệu vẫn lưu trên máy (LocalStorage). Vui lòng bấm "Đồng bộ ngay" sau khi kiểm tra mạng.');
+          }
+        } catch (e) {
+          if (writeSuccess) showNotification('error', 'Không thể xác thực dữ liệu trên Firebase.');
+        }
         ignoreFirestoreSync.current = false; // Re-enable listeners after sync
       }
     }, 100);
@@ -2824,14 +2837,14 @@ export default function App() {
             if (!matchesCommune) return false;
           }
         } else if (currentUser.role === 'SURVEYOR') {
-          // SURVEYOR can strictly only see communes that contain their assigned areas
+// SURVEYOR can strictly only see communes that contain their assigned areas
           if (!currentUser.assignedAreas.includes('ALL')) {
             const hasMyAreas = areas.some(a => 
               (a.communeId === item.commune.id || (a as any).communeCode === item.commune.communeCode) &&
               (currentUser.assignedAreas.includes('ALL') || 
-               currentUser.assignedAreas.includes(a.id) || 
-               currentUser.assignedAreas.includes(a.code) || 
-               currentUser.assignedAreas.includes(`${a.communeId}_${a.code}`))
+                currentUser.assignedAreas.includes(a.id) || 
+                currentUser.assignedAreas.includes(a.code) || 
+                currentUser.assignedAreas.includes(`${a.communeId}-${a.code}`))
             );
             if (!hasMyAreas) return false;
           }
@@ -4688,7 +4701,7 @@ export default function App() {
             </button>
           )}
 
-          {(currentUser.role === 'ADMIN' || currentUser.role === 'SUPERVISOR') && (
+          {(currentUser.role === 'ADMIN' || currentUser.role === 'SUPERVISOR' || currentUser.role === 'SURVEYOR') && (
             <button 
               onClick={() => setActiveTab('entry')}
               className={`px-3.5 py-2 flex items-center gap-1.5 transition-all cursor-pointer whitespace-nowrap rounded-t-md font-bold ${
