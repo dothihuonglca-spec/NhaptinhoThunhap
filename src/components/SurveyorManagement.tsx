@@ -110,6 +110,36 @@ export default function SurveyorManagement({
   const [surveyorCommuneFilter, setSurveyorCommuneFilter] = useState<string>('ALL');
   const [isAssigning, setIsAssigning] = useState(false);
 
+  // Phạm vi địa bàn & xã mà Giám sát viên được phân công phụ trách
+  const allowedSupervisorCommunes = React.useMemo(() => {
+    if (!currentUser || currentUser.role !== 'SUPERVISOR') return communes;
+    if (currentUser.assignedCommunes && !currentUser.assignedCommunes.includes('ALL') && currentUser.assignedCommunes.length > 0) {
+      return communes.filter(c => 
+        currentUser.assignedCommunes?.includes(c.id) || 
+        currentUser.assignedCommunes?.includes(c.communeCode)
+      );
+    }
+    if (currentUser.assignedAreas && !currentUser.assignedAreas.includes('ALL') && currentUser.assignedAreas.length > 0) {
+      const commIds = new Set(areas.filter(a => 
+        currentUser.assignedAreas?.includes(a.id) || 
+        currentUser.assignedAreas?.includes(a.code) || 
+        currentUser.assignedAreas?.includes(`${a.communeId}_${a.code}`)
+      ).map(a => a.communeId));
+      return communes.filter(c => commIds.has(c.id) || commIds.has(c.communeCode));
+    }
+    return communes;
+  }, [communes, areas, currentUser]);
+
+  const allowedSupervisorAreas = React.useMemo(() => {
+    if (!currentUser || currentUser.role !== 'SUPERVISOR') return areas;
+    const commIds = new Set(allowedSupervisorCommunes.map(c => c.id));
+    const commCodes = new Set(allowedSupervisorCommunes.map(c => c.communeCode));
+    return areas.filter(a => 
+      commIds.has(a.communeId) || 
+      commCodes.has((a as any).communeCode)
+    );
+  }, [areas, allowedSupervisorCommunes, currentUser]);
+
   // Tự động tích chọn các địa bàn mà cán bộ này đang phụ trách khi thay đổi người được chọn
   useEffect(() => {
     if (!assignSurveyorId) {
@@ -166,35 +196,7 @@ export default function SurveyorManagement({
     return Array.from(map.entries()).map(([code, label]) => ({ code, label }));
   }, [communes]);
 
-  // Phạm vi địa bàn & xã mà Giám sát viên được phân công phụ trách
-  const allowedSupervisorCommunes = React.useMemo(() => {
-    if (!currentUser || currentUser.role !== 'SUPERVISOR') return communes;
-    if (currentUser.assignedCommunes && !currentUser.assignedCommunes.includes('ALL') && currentUser.assignedCommunes.length > 0) {
-      return communes.filter(c => 
-        currentUser.assignedCommunes?.includes(c.id) || 
-        currentUser.assignedCommunes?.includes(c.communeCode)
-      );
-    }
-    if (currentUser.assignedAreas && !currentUser.assignedAreas.includes('ALL') && currentUser.assignedAreas.length > 0) {
-      const commIds = new Set(areas.filter(a => 
-        currentUser.assignedAreas?.includes(a.id) || 
-        currentUser.assignedAreas?.includes(a.code) || 
-        currentUser.assignedAreas?.includes(`${a.communeId}_${a.code}`)
-      ).map(a => a.communeId));
-      return communes.filter(c => commIds.has(c.id) || commIds.has(c.communeCode));
-    }
-    return communes;
-  }, [communes, areas, currentUser]);
 
-  const allowedSupervisorAreas = React.useMemo(() => {
-    if (!currentUser || currentUser.role !== 'SUPERVISOR') return areas;
-    const commIds = new Set(allowedSupervisorCommunes.map(c => c.id));
-    const commCodes = new Set(allowedSupervisorCommunes.map(c => c.communeCode));
-    return areas.filter(a => 
-      commIds.has(a.communeId) || 
-      commCodes.has((a as any).communeCode)
-    );
-  }, [areas, allowedSupervisorCommunes, currentUser]);
 
   // Supervisor commune assignment state
   const [formAllCommunes, setFormAllCommunes] = useState<boolean>(false);
@@ -540,7 +542,7 @@ export default function SurveyorManagement({
 
   const handleExportTemplate = () => {
     try {
-      exportPermissionExcelTemplate(communes, areas, surveyors, households);
+      exportPermissionExcelTemplate(communes, areas, surveyors, households as any);
       showNotification('success', 'Đã tải xuống file mẫu Excel phân công và phân quyền thành công.');
     } catch (err: any) {
       showNotification('error', 'Lỗi khi xuất file mẫu: ' + err.message);
@@ -1096,7 +1098,7 @@ export default function SurveyorManagement({
                           type="button"
                           onClick={() => {
                             setDeptFilter(dept.id);
-                            setSubTab('surveyors');
+                            setSubTab('dtv');
                           }}
                           className="text-[10px] text-sky-700 hover:underline font-bold"
                         >
@@ -1177,7 +1179,7 @@ export default function SurveyorManagement({
       )}
 
       {/* VIEW 2: SURVEYORS & ACCOUNTS MANAGEMENT */}
-      {(subTab === 'gsv' || subTab === 'dtv' || subTab === 'surveyors') && (
+      {(subTab === 'gsv' || subTab === 'dtv') && (
         <div className="flex flex-col gap-4">
           {/* Quick Batch Assignment Box */}
           <div className="bg-linear-to-r from-sky-50 to-indigo-50 border border-sky-200 rounded-lg p-3.5 flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
