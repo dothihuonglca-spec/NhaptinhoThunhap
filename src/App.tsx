@@ -2589,6 +2589,9 @@ export default function App() {
       // 4. Role-based access control (chỉ áp dụng khi không phải ADMIN)
       if (currentUser && currentUser.role !== 'ADMIN') {
         if (currentUser.role === 'SURVEYOR') {
+          // Nếu hộ đã được gán cho ĐTV khác -> Không hiển thị (tránh lẫn tên người khác)
+          if (h.assignedSurveyorId && h.assignedSurveyorId !== currentUser.id) return false;
+
           const isDirect = h.assignedSurveyorId === currentUser.id;
           const isAreaMatch = currentUser.assignedAreas.includes('ALL') || 
             currentUser.assignedAreas.includes(h.areaCode) || 
@@ -2798,16 +2801,18 @@ export default function App() {
           list = list.filter(h => currentUser.assignedCommunes?.includes(h.communeId) || (Boolean(h.communeCode) && currentUser.assignedCommunes?.includes(h.communeCode)));
         }
       } else if (currentUser.role === 'SURVEYOR') {
-        list = list.filter(h => 
-          h.assignedSurveyorId === currentUser.id || 
-          currentUser.assignedAreas.includes('ALL') || 
-          currentUser.assignedAreas.includes(h.areaCode) ||
-          currentUser.assignedAreas.includes(h.areaId) ||
-          currentUser.assignedAreas.some(item => {
-            const ar = areas.find(a => a.id === item || a.code === item || `${a.communeId}_${a.code}` === item);
-            return ar && (ar.id === h.areaId || ar.code === h.areaCode || (ar.communeId === h.communeId && ar.code === h.areaCode));
-          })
-        );
+        list = list.filter(h => {
+          if (h.assignedSurveyorId && h.assignedSurveyorId !== currentUser.id) return false;
+          const isDirect = h.assignedSurveyorId === currentUser.id;
+          const isAreaMatch = currentUser.assignedAreas.includes('ALL') || 
+            currentUser.assignedAreas.includes(h.areaCode) ||
+            currentUser.assignedAreas.includes(h.areaId) ||
+            currentUser.assignedAreas.some(item => {
+              const ar = areas.find(a => a.id === item || a.code === item || `${a.communeId}_${a.code}` === item);
+              return ar && (ar.id === h.areaId || ar.code === h.areaCode || (ar.communeId === h.communeId && ar.code === h.areaCode));
+            });
+          return isDirect || isAreaMatch;
+        });
       }
     }
 
