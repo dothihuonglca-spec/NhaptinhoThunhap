@@ -1807,12 +1807,12 @@ export default function SurveyorManagement({
                     <td className="p-2.5 text-center border-r border-slate-200 text-slate-700 font-medium">Chỉ xem các xã được phân công phụ trách</td>
                     <td className="p-2.5 text-center text-slate-700 font-medium">Chỉ xem hộ thuộc đúng các địa bàn được giao</td>
                   </tr>
-                  <tr className="bg-slate-50/40">
-                    <td className="p-2.5 font-bold text-slate-800 border-r border-slate-200">Thu thập & Nhập tin phiếu điều tra</td>
-                    <td className="p-2.5 text-center border-r border-slate-200 text-emerald-700 font-bold">✓ Toàn quyền nhập & sửa mọi phiếu</td>
-                    <td className="p-2.5 text-center border-r border-slate-200 text-emerald-700 font-bold">✓ Nhập & phúc tra trong các xã phụ trách</td>
-                    <td className="p-2.5 text-center text-emerald-700 font-bold">✓ Nhập phiếu cho các địa bàn của mình</td>
-                  </tr>
+                   <tr className="bg-slate-50/40">
+                     <td className="p-2.5 font-bold text-slate-800 border-r border-slate-200">Thu thập & Nhập tin phiếu điều tra</td>
+                     <td className="p-2.5 text-center border-r border-slate-200 text-emerald-700 font-bold">✓ Toàn quyền nhập & sửa mọi phiếu</td>
+                     <td className="p-2.5 text-center border-r border-slate-200 text-amber-800 font-bold">✕ Không trực tiếp nhập tin (Chỉ giám sát & quản lý)</td>
+                     <td className="p-2.5 text-center text-emerald-700 font-bold">✓ Nhập phiếu cho các địa bàn của mình</td>
+                   </tr>
                   <tr>
                     <td className="p-2.5 font-bold text-slate-800 border-r border-slate-200">Kiểm tra, phúc tra & Duyệt số liệu</td>
                     <td className="p-2.5 text-center border-r border-slate-200 text-emerald-700 font-bold">✓ Duyệt & Chốt số liệu toàn huyện</td>
