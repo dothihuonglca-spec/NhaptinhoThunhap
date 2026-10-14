@@ -50,7 +50,7 @@ export const ROLE_LABELS: Record<UserRole, { label: string; color: string; desc:
   SUPERVISOR: { 
     label: 'Giám sát viên', 
     color: 'bg-amber-50 text-amber-700 border-amber-300', 
-    desc: 'Giám sát địa bàn, hướng dẫn điều tra viên' 
+    desc: 'Giám sát, quản lý và phân quyền địa bàn cho các Điều tra viên (ĐTV) trong phòng' 
   },
   SURVEYOR: { 
     label: 'Điều tra viên', 
