@@ -3238,20 +3238,15 @@ export default function App() {
     await handleSaveDepartment(updated);
   };
 
-  const handleBatchAssignArea = async (surveyorId: string, areaIdOrCode: string | string[], communeIdsOrCodes?: string[]) => {
+  const handleBatchAssignArea = async (surveyorId: string, areaIdOrCode: string | string[], communeIdsOrCodes?: string[], scopeAreaIds?: string[]) => {
     const targetSurveyor = surveyors.find(s => s.id === surveyorId);
     if (!targetSurveyor) return;
 
-    const areaInputList = Array.isArray(areaIdOrCode) ? areaIdOrCode : (areaIdOrCode ? [areaIdOrCode] : []);
+    const selectedAreaIds = Array.isArray(areaIdOrCode) ? areaIdOrCode : (areaIdOrCode ? [areaIdOrCode] : []);
+    const scopeIds = scopeAreaIds || areas.map(a => a.id);
     const targetCommuneSet = new Set<string>(communeIdsOrCodes || []);
 
-    const targetAreas = areas.filter(a => 
-      areaInputList.includes(a.id) || 
-      areaInputList.includes(a.code) || 
-      areaInputList.includes(`${a.communeId}_${a.code}`) ||
-      (communeIdsOrCodes && (communeIdsOrCodes.includes(a.communeId) || (Boolean((a as any).communeCode) && communeIdsOrCodes.includes((a as any).communeCode))))
-    );
-
+    const targetAreas = areas.filter(a => selectedAreaIds.includes(a.id) || selectedAreaIds.includes(a.code) || selectedAreaIds.includes(`${a.communeId}_${a.code}`));
     const targetAreaIds = new Set(targetAreas.map(a => a.id));
     const targetAreaKeys = new Set(targetAreas.map(a => `${a.communeId}_${a.code}`));
     targetAreas.forEach(a => {
@@ -3260,20 +3255,26 @@ export default function App() {
     });
 
     const updatedHouseholds = households.map(h => {
-      const isMatch = targetAreaIds.has(h.areaId) || 
+      const inScope = scopeIds.includes(h.areaId) || scopeIds.includes(h.areaCode) || scopeIds.includes(`${h.communeId}_${h.areaCode}`);
+      const isSelectedMatch = targetAreaIds.has(h.areaId) || 
         targetAreaKeys.has(`${h.communeId}_${h.areaCode}`) ||
-        areaInputList.includes(h.areaId) ||
-        (targetCommuneSet.size > 0 && (targetCommuneSet.has(h.communeId) || (Boolean(h.communeCode) && targetCommuneSet.has(h.communeCode)))) ||
-        targetAreas.some(a => 
-          (a.id === h.areaId) || 
-          (a.code === h.areaCode && (a.communeId === h.communeId || (a as any).communeCode === h.communeCode))
-        );
-      if (isMatch) {
-        return {
-          ...h,
-          assignedSurveyorId: targetSurveyor.id,
-          assignedSurveyorName: targetSurveyor.name
-        };
+        selectedAreaIds.includes(h.areaId) ||
+        selectedAreaIds.includes(h.areaCode);
+
+      if (inScope) {
+        if (isSelectedMatch) {
+          return {
+            ...h,
+            assignedSurveyorId: targetSurveyor.id,
+            assignedSurveyorName: targetSurveyor.name
+          };
+        } else if (h.assignedSurveyorId === targetSurveyor.id) {
+          return {
+            ...h,
+            assignedSurveyorId: '',
+            assignedSurveyorName: ''
+          };
+        }
       }
       return h;
     });
@@ -3281,18 +3282,25 @@ export default function App() {
     setHouseholds(updatedHouseholds);
     try { localStorage.setItem('cached_households', JSON.stringify(updatedHouseholds)); } catch (e) {}
 
-    // Cập nhật assignedAreas và assignedCommunes của Điều tra viên/Giám sát viên (loại bỏ 001 nếu có)
-    const newAssignedIds = targetAreas.length > 0 ? targetAreas.map(a => a.id) : areaInputList;
-    const prevAssigned = (targetSurveyor.assignedAreas || []).filter(item => item !== '001');
-    const cleanedAssigned = Array.from(new Set([...prevAssigned, ...newAssignedIds]));
-
-    const prevCommunes = (targetSurveyor.assignedCommunes || []);
-    const cleanedCommunes = Array.from(new Set([...prevCommunes, ...Array.from(targetCommuneSet)]));
+    let currentAssigned = (targetSurveyor.assignedAreas || []).filter(item => item !== '001');
+    if (currentAssigned.includes('ALL')) {
+      currentAssigned = areas.map(a => a.id);
+    }
+    const newAssignedSet = new Set(currentAssigned);
+    scopeIds.forEach(id => {
+      newAssignedSet.delete(id);
+      const ar = areas.find(a => a.id === id);
+      if (ar) {
+        newAssignedSet.delete(ar.code);
+        newAssignedSet.delete(`${ar.communeId}_${ar.code}`);
+      }
+    });
+    selectedAreaIds.forEach(id => newAssignedSet.add(id));
 
     const updatedSurveyor: Surveyor = {
       ...targetSurveyor,
-      assignedAreas: cleanedAssigned,
-      assignedCommunes: cleanedCommunes.length > 0 ? cleanedCommunes : targetSurveyor.assignedCommunes,
+      assignedAreas: Array.from(newAssignedSet),
+      assignedCommunes: targetCommuneSet.size > 0 ? Array.from(targetCommuneSet) : targetSurveyor.assignedCommunes,
       updatedAt: new Date().toISOString()
     };
     await handleSaveSurveyor(updatedSurveyor);
