@@ -172,9 +172,36 @@ export default function App() {
 
   const [activeTab, setActiveTab] = useState<'industrial_survey' | 'import' | 'entry' | 'surveyor_progress' | 'tnh' | 'macro_control' | 'database' | 'catalog' | 'surveyors'>('entry');
   
-  const [communes, setCommunes] = useState<Commune[]>([]);
-  const [areas, setAreas] = useState<SurveyArea[]>([]);
-  const [households, setHouseholds] = useState<Household[]>([]);
+  const [communes, setCommunes] = useState<Commune[]>(() => {
+    try {
+      const cached = localStorage.getItem('cached_communes');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return OFFICIAL_COMMUNES_CATALOG;
+  });
+  const [areas, setAreas] = useState<SurveyArea[]>(() => {
+    try {
+      const cached = localStorage.getItem('cached_areas');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  });
+  const [households, setHouseholds] = useState<Household[]>(() => {
+    try {
+      const cached = localStorage.getItem('cached_households');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  });
   const [surveyors, setSurveyors] = useState<Surveyor[]>(() => {
     try {
       const cached = localStorage.getItem('cached_surveyors');
@@ -185,10 +212,19 @@ export default function App() {
     } catch (e) {}
     return [DEFAULT_SURVEYORS[0], ...OFFICIAL_PERSONNEL_LIST];
   });
-  const [departments, setDepartments] = useState<Department[]>([]);
+  const [departments, setDepartments] = useState<Department[]>(() => {
+    try {
+      const cached = localStorage.getItem('cached_departments');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return OFFICIAL_5_DEPARTMENTS;
+  });
 
   const [currentSurveyorId, setCurrentSurveyorId] = useState<string>('admin');
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   
   // Real Login & Authentication States
@@ -216,7 +252,6 @@ export default function App() {
       if (user) {
         setIsLoggedIn(true);
       }
-      setLoading(false);
     });
     return () => unsubscribe();
   }, []);
