@@ -491,20 +491,21 @@ export default function SurveyorManagement({
       : quickAssignAvailableAreas.map(a => a.id);
 
     if (areaIdsToAssign.length === 0) {
-      showNotification('error', 'Không có địa bàn nào phù hợp với bộ lọc để phân công.');
+      showNotification('error', 'Vui lòng chọn ít nhất một địa bàn cần phân công.');
       return;
     }
     const targetSurveyor = surveyors.find(s => s.id === assignSurveyorId);
     if (!targetSurveyor) return;
 
-    const communeIdsToAssign = quickAssignFilteredCommunes.map(c => c.id);
+    const assignedAreasList = allowedSupervisorAreas.filter(a => areaIdsToAssign.includes(a.id));
+    const communeIdsToAssign = Array.from(new Set(assignedAreasList.map(a => a.communeId).filter(Boolean)));
 
     try {
       setIsAssigning(true);
       await onBatchAssignArea(
         assignSurveyorId, 
         areaIdsToAssign, 
-        quickAssignCommuneId === 'ALL' ? communeIdsToAssign : [quickAssignCommuneId]
+        communeIdsToAssign.length > 0 ? communeIdsToAssign : quickAssignFilteredCommunes.map(c => c.id)
       );
       showNotification('success', `Đã phân công thành công ${areaIdsToAssign.length} địa bàn cho ${targetSurveyor.name}!`);
       setIsAreaDropdownOpen(false);
@@ -1170,7 +1171,6 @@ export default function SurveyorManagement({
                   onChange={e => {
                     const val = e.target.value;
                     setQuickAssignTkcs(val);
-                    setQuickAssignSelectedAreaIds([]);
                   }}
                   className="bg-white border border-slate-300 rounded px-2.5 py-1.5 font-bold text-slate-900 focus:outline-sky-500"
                   title="Lọc theo Thống kê cơ sở"
@@ -1192,7 +1192,6 @@ export default function SurveyorManagement({
                   onChange={e => {
                     const cId = e.target.value;
                     setQuickAssignCommuneId(cId);
-                    setQuickAssignSelectedAreaIds([]);
                   }}
                   className="bg-white border border-sky-400 rounded px-2.5 py-1.5 font-bold text-slate-900 shadow-2xs focus:outline-sky-500"
                   title="Chọn xã để chỉ hiển thị các địa bàn thuộc xã đó"
@@ -1224,7 +1223,7 @@ export default function SurveyorManagement({
                       ? `Chọn địa bàn (${quickAssignAvailableAreas.length})` 
                       : quickAssignSelectedAreaIds.length === quickAssignAvailableAreas.length 
                       ? `Tất cả (${quickAssignAvailableAreas.length} địa bàn)` 
-                      : `Đã chọn: ${quickAssignSelectedAreaIds.length} / ${quickAssignAvailableAreas.length}`}
+                      : `Đã chọn: ${quickAssignSelectedAreaIds.length} địa bàn`}
                   </span>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
                 </button>
@@ -1240,7 +1239,7 @@ export default function SurveyorManagement({
                           onChange={handleToggleSelectAllQuickAreas}
                           className="rounded text-sky-700 w-4 h-4 cursor-pointer"
                         />
-                        <span>Chọn tất cả các địa bàn ({quickAssignAvailableAreas.length})</span>
+                        <span>Chọn tất cả các địa bàn hiển thị ({quickAssignAvailableAreas.length})</span>
                       </label>
                       <button
                         type="button"
@@ -1296,7 +1295,7 @@ export default function SurveyorManagement({
                           onClick={() => setQuickAssignSelectedAreaIds([])}
                           className="text-rose-600 hover:underline font-bold"
                         >
-                          Bỏ chọn
+                          Bỏ chọn tất cả
                         </button>
                         <button
                           type="button"
@@ -1315,9 +1314,9 @@ export default function SurveyorManagement({
               <button
                 type="button"
                 onClick={handleExecuteBatchAssign}
-                disabled={isAssigning || !assignSurveyorId || quickAssignAvailableAreas.length === 0}
+                disabled={isAssigning || !assignSurveyorId}
                 className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-300 disabled:text-slate-500 text-white rounded font-bold cursor-pointer transition-colors shadow-2xs flex items-center gap-1.5 shrink-0"
-                title="Gán toàn bộ các hộ trong các địa bàn đã chọn (hoặc toàn bộ địa bàn theo bộ lọc) cho Cán bộ / ĐTV này"
+                title="Gán các địa bàn đã chọn (hoặc toàn bộ địa bàn theo bộ lọc) cho Cán bộ / ĐTV này"
               >
                 {isAssigning ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                 <span>Áp dụng phân</span>
