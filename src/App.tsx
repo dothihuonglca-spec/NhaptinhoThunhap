@@ -383,7 +383,7 @@ export default function App() {
   const [catalogSearchTerm, setCatalogSearchTerm] = useState('');
 
   useEffect(() => {
-    // 1. Ensure user document exists if logged in
+    // 1. Ensure user document exists if logged in (isolated effect so listeners are not restarted)
     if (isLoggedIn) {
       const ensureUserDoc = async () => {
         try {
@@ -407,8 +407,10 @@ export default function App() {
       };
       ensureUserDoc();
     }
+  }, [isLoggedIn, currentSurveyorId]);
 
-    // 2. Setup listeners
+  // 2. Setup listeners once on mount - keeps connections active so login and tab switches are instantaneous
+  useEffect(() => {
     const unsubCommunes = onSnapshot(collection(db, 'communes'), (snapshot) => {
       const existingComs: Commune[] = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Commune));
       if (snapshot.empty || existingComs.length === 0) {
@@ -576,7 +578,7 @@ export default function App() {
       unsubSurveyors();
       unsubDepartments();
     };
-  }, [isLoggedIn, currentSurveyorId]);
+  }, []);
 
   const currentUser: Surveyor = useMemo(() => {
     const found = surveyors.find(s => s.id === currentSurveyorId);
@@ -588,20 +590,38 @@ export default function App() {
     setTimeout(() => setNotification(null), 4000);
   };
 
-  // Tự động đồng bộ và khôi phục tên địa bàn (tên sheet), mã/tên xã, TKCS cho các hộ gia đình từ danh mục
+  // Tự động đồng bộ và khôi phục tên địa bàn (tên sheet), mã/tên xã, TKCS cho các hộ gia đình từ danh mục (Tối ưu O(1) tốc độ cao)
   useEffect(() => {
     if (households.length > 0) {
+      const comByCode = new Map<string, Commune>();
+      const comById = new Map<string, Commune>();
+      const comByName = new Map<string, Commune>();
+      communes.forEach(c => {
+        if (c.communeCode) comByCode.set(c.communeCode.trim().toLowerCase(), c);
+        if (c.id) comById.set(c.id, c);
+        if (c.communeName) comByName.set(c.communeName.trim().toLowerCase(), c);
+      });
+
+      const areaById = new Map<string, SurveyArea>();
+      const areaByCommuneAndCode = new Map<string, SurveyArea>();
+      areas.forEach(a => {
+        if (a.id) areaById.set(a.id, a);
+        if (a.code) {
+          if (a.communeId) areaByCommuneAndCode.set(`${a.communeId}_${a.code}`, a);
+          if ((a as any).communeCode) areaByCommuneAndCode.set(`${(a as any).communeCode}_${a.code}`, a);
+        }
+      });
+
       let hasHealed = false;
       const healedHouseholds = households.map(h => {
         let updated = { ...h };
         let changed = false;
 
-        // 1. Đồng bộ xã & TKCS từ danh mục communes
-        const matchedCommune = communes.find(c => 
-          (Boolean(h.communeCode) && c.communeCode === h.communeCode) ||
-          (Boolean(h.communeId) && (c.id === h.communeId || c.communeCode === h.communeId)) ||
-          (Boolean(h.communeName) && c.communeName && h.communeName.trim().toLowerCase() === c.communeName.trim().toLowerCase())
-        );
+        // 1. Đồng bộ xã & TKCS từ danh mục communes (O(1))
+        const matchedCommune = 
+          (h.communeCode ? comByCode.get(h.communeCode.trim().toLowerCase()) : null) ||
+          (h.communeId ? comById.get(h.communeId) : null) ||
+          (h.communeName ? comByName.get(h.communeName.trim().toLowerCase()) : null);
 
         if (matchedCommune) {
           if (updated.communeId !== matchedCommune.id) {
@@ -637,10 +657,9 @@ export default function App() {
             changed = true;
           }
         } else if (isCurNameBad) {
-          const matchedArea = areas.find(a => 
-            (updated.areaId && a.id === updated.areaId) || 
-            (a.code === updated.areaCode && (a.communeId === updated.communeId || (a as any).communeCode === updated.communeCode))
-          );
+          const matchedArea = (updated.areaId ? areaById.get(updated.areaId) : null) || 
+            areaByCommuneAndCode.get(`${updated.communeId}_${updated.areaCode}`) ||
+            (updated.communeCode ? areaByCommuneAndCode.get(`${updated.communeCode}_${updated.areaCode}`) : null);
 
           if (matchedArea?.name && matchedArea.name.trim() && matchedArea.name !== '001' && matchedArea.name !== matchedArea.code && matchedArea.name !== 'Địa bàn' && !matchedArea.name.startsWith('Địa bàn 001')) {
             updated.areaName = matchedArea.name.trim();
@@ -658,7 +677,9 @@ export default function App() {
 
       if (hasHealed) {
         setHouseholds(healedHouseholds);
-        try { localStorage.setItem('cached_households', JSON.stringify(healedHouseholds)); } catch (e) {}
+        setTimeout(() => {
+          try { localStorage.setItem('cached_households', JSON.stringify(healedHouseholds)); } catch (e) {}
+        }, 100);
       }
 
       // Tự động khôi phục hoặc cập nhật danh mục areas từ tên sheet của households
@@ -693,26 +714,27 @@ export default function App() {
         const reconstructed = Array.from(areaMap.values());
         if (reconstructed.length > 0) {
           setAreas(reconstructed);
-          try { localStorage.setItem('cached_areas', JSON.stringify(reconstructed)); } catch (e) {}
+          setTimeout(() => {
+            try { localStorage.setItem('cached_areas', JSON.stringify(reconstructed)); } catch (e) {}
+          }, 100);
         }
       } else {
-        // Nếu areas đã có nhưng có phần tử mang tên 001 hoặc chưa lấy đúng tên sheet từ bảng kê
+        // Index households by area key for O(1) area name resolution
+        const hhSheetByAreaKey = new Map<string, string>();
+        households.forEach(h => {
+          const sName = ((h as any).sheetName || h.areaName || '').trim();
+          if (sName && sName !== '001' && sName !== 'Địa bàn' && sName !== '---' && !sName.startsWith('Địa bàn 001')) {
+            if (h.areaId && !hhSheetByAreaKey.has(h.areaId)) hhSheetByAreaKey.set(h.areaId, sName);
+            const cCodeKey = `${h.communeCode || h.communeId}_${h.areaCode}`;
+            if (!hhSheetByAreaKey.has(cCodeKey)) hhSheetByAreaKey.set(cCodeKey, sName);
+          }
+        });
+
         let needUpdateAreas = false;
         const cleanedAreas = areas.map(a => {
           const isBadName = !a.name || a.name === '001' || a.name === a.code || a.name === 'Địa bàn' || a.name.startsWith('Địa bàn 001');
           if (isBadName) {
-            const matchingH = households.find(h => 
-              (h.areaId === a.id || (h.areaCode === a.code && (h.communeId === a.communeId || (h as any).communeCode === a.communeCode))) &&
-              Boolean((h as any).sheetName || h.areaName) &&
-              (h as any).sheetName !== '001' && h.areaName !== '001' &&
-              (h as any).sheetName !== 'Địa bàn' && h.areaName !== 'Địa bàn' &&
-              !(h as any).sheetName?.startsWith('Địa bàn 001') && !h.areaName?.startsWith('Địa bàn 001')
-            );
-            const resolvedName = ((matchingH as any)?.sheetName && (matchingH as any).sheetName !== '001' && (matchingH as any).sheetName !== 'Địa bàn')
-              ? (matchingH as any).sheetName.trim()
-              : (matchingH?.areaName && matchingH.areaName !== '001' && matchingH.areaName !== matchingH.areaCode)
-              ? matchingH.areaName.trim()
-              : null;
+            const resolvedName = hhSheetByAreaKey.get(a.id) || hhSheetByAreaKey.get(`${a.communeId}_${a.code}`) || (a.communeCode ? hhSheetByAreaKey.get(`${a.communeCode}_${a.code}`) : null);
             if (resolvedName && resolvedName !== a.name) {
               needUpdateAreas = true;
               return { ...a, name: resolvedName };
@@ -723,16 +745,18 @@ export default function App() {
 
         if (needUpdateAreas) {
           setAreas(cleanedAreas);
-          try { localStorage.setItem('cached_areas', JSON.stringify(cleanedAreas)); } catch (e) {}
+          setTimeout(() => {
+            try { localStorage.setItem('cached_areas', JSON.stringify(cleanedAreas)); } catch (e) {}
+          }, 100);
         }
       }
 
       // Tự động làm sạch các tài khoản điều tra viên nếu có gán nhầm mã 001
       const hasBadSurveyor = surveyors.some(s => s.assignedAreas?.includes('001'));
       if (hasBadSurveyor && areas.length > 0) {
+        const matchingArea001 = areas.find(a => a.code === '001');
         const cleanedSurveyors = surveyors.map(s => {
           if (s.assignedAreas?.includes('001')) {
-            const matchingArea001 = areas.find(a => a.code === '001');
             const newAreas = s.assignedAreas.filter(x => x !== '001');
             if (matchingArea001) newAreas.push(matchingArea001.id);
             return {
@@ -743,7 +767,9 @@ export default function App() {
           return s;
         });
         setSurveyors(cleanedSurveyors);
-        try { localStorage.setItem('cached_surveyors', JSON.stringify(cleanedSurveyors)); } catch (e) {}
+        setTimeout(() => {
+          try { localStorage.setItem('cached_surveyors', JSON.stringify(cleanedSurveyors)); } catch (e) {}
+        }, 100);
       }
     }
   }, [areas, communes, households]);
@@ -800,6 +826,19 @@ export default function App() {
     });
     return Array.from(map.values()).sort((a, b) => a.code.localeCompare(b.code));
   }, [communes]);
+
+  // Map ánh xạ nhanh Điều tra viên phụ trách theo Địa bàn để liên kết chặt chẽ với cột Người nhập/ĐTV
+  const areaSurveyorMap = useMemo(() => {
+    const map = new Map<string, Surveyor>();
+    surveyors.forEach(s => {
+      if (s.role === 'SURVEYOR' && s.assignedAreas && !s.assignedAreas.includes('ALL')) {
+        s.assignedAreas.forEach(aKey => {
+          map.set(aKey, s);
+        });
+      }
+    });
+    return map;
+  }, [surveyors]);
 
   // Bộ lọc thông minh được phân quyền theo vai trò (Chỉ hiện địa bàn/xã mà tài khoản phụ trách)
   const availableFilterCommunes = useMemo(() => {
@@ -973,6 +1012,30 @@ export default function App() {
     handleSelectCommuneFromCatalog(c.id);
     setActiveTab('import');
     showNotification('success', `Đã chọn xã [${c.communeCode}] ${c.communeName}. Sẵn sàng tải file bảng kê.`);
+  };
+
+  // Link trực tiếp từ Tiến độ Điều tra viên sang Nhập tin hộ (Tab 2)
+  const handleNavigateToHouseholdEntryFromProgress = (surveyorNameOrId: string, areaId?: string, communeId?: string) => {
+    if (communeId && communeId !== 'ALL') {
+      setSelectedCommuneId(communeId);
+      const matchedCom = communes.find(c => c.id === communeId || c.communeCode === communeId);
+      if (matchedCom?.tkcsCode) {
+        setSelectedTkcs(matchedCom.tkcsCode);
+        setTnhSelectedTkcs(matchedCom.tkcsCode);
+      }
+      setTnhSelectedCommuneId(communeId);
+    }
+    if (areaId && areaId !== 'ALL') {
+      setSelectedAreaId(areaId);
+    } else {
+      setSelectedAreaId('ALL');
+    }
+    if (surveyorNameOrId && surveyorNameOrId !== '---' && surveyorNameOrId !== 'Chưa phân công điều tra viên') {
+      setSelectedSurveyorFilter(surveyorNameOrId);
+    }
+    setCurrentPage(1);
+    setActiveTab('entry');
+    showNotification('success', `Đã liên kết số liệu sang phần Nhập tin hộ ${surveyorNameOrId ? `cho: "${surveyorNameOrId}"` : ''}.`);
   };
 
   const handleSaveEditedCommune = async (e: React.FormEvent) => {
@@ -2545,12 +2608,21 @@ export default function App() {
         }
       }
 
-      // 5. Lọc theo người nhập / ĐTV
+      // 5. Lọc theo người nhập / ĐTV (Liên kết thông minh qua ID, Tên và Phân công địa bàn)
       if (selectedSurveyorFilter !== 'ALL') {
+        const areaSurv = areaSurveyorMap.get(h.areaId) || areaSurveyorMap.get(h.areaCode) || areaSurveyorMap.get(`${h.communeId}_${h.areaCode}`);
+        const effectiveName = h.assignedSurveyorName || areaSurv?.name || '';
+        const effectiveId = h.assignedSurveyorId || areaSurv?.id || '';
+
         if (selectedSurveyorFilter === 'UNASSIGNED') {
-          if (h.assignedSurveyorId) return false;
-        } else if (h.assignedSurveyorId !== selectedSurveyorFilter) {
-          return false;
+          if (effectiveName || effectiveId) return false;
+        } else {
+          const isMatch = 
+            h.assignedSurveyorId === selectedSurveyorFilter ||
+            h.assignedSurveyorName === selectedSurveyorFilter ||
+            effectiveId === selectedSurveyorFilter ||
+            effectiveName === selectedSurveyorFilter;
+          if (!isMatch) return false;
         }
       }
 
@@ -2621,6 +2693,7 @@ export default function App() {
     households, 
     communes, 
     areas, 
+    areaSurveyorMap,
     selectedTkcs, 
     selectedCommuneId, 
     selectedAreaId, 
@@ -2881,8 +2954,32 @@ export default function App() {
     };
   }, [tnhScopeCommunes, tnhScopeHouseholds]);
 
-  // Tổng hợp nhanh số liệu cho từng xã trong danh mục đầy đủ 19 cột để link trực tiếp
+  // Tổng hợp nhanh số liệu cho từng xã trong danh mục đầy đủ 19 cột để link trực tiếp (Tối ưu O(N) với Map)
   const communesTnhOverview = useMemo(() => {
+    const hhByCommune = new Map<string, Household[]>();
+    households.forEach(h => {
+      if (h.communeId) {
+        if (!hhByCommune.has(h.communeId)) hhByCommune.set(h.communeId, []);
+        hhByCommune.get(h.communeId)!.push(h);
+      }
+      if (h.communeCode) {
+        if (!hhByCommune.has(h.communeCode)) hhByCommune.set(h.communeCode, []);
+        hhByCommune.get(h.communeCode)!.push(h);
+      }
+    });
+
+    const areasByCommune = new Map<string, SurveyArea[]>();
+    areas.forEach(a => {
+      if (a.communeId) {
+        if (!areasByCommune.has(a.communeId)) areasByCommune.set(a.communeId, []);
+        areasByCommune.get(a.communeId)!.push(a);
+      }
+      if ((a as any).communeCode) {
+        if (!areasByCommune.has((a as any).communeCode)) areasByCommune.set((a as any).communeCode, []);
+        areasByCommune.get((a as any).communeCode)!.push(a);
+      }
+    });
+
     return communes.map((c, idx) => {
       const oc = OFFICIAL_COMMUNES_CATALOG.find(item => item.communeCode === c.communeCode || item.id === c.id);
       const mergedCommune: Commune = {
@@ -2908,31 +3005,32 @@ export default function App() {
         mauDuPhong: c.mauDuPhong ?? 0,
       };
 
-      const cHouseholds = households.filter(h => h.communeId === c.id || (Boolean(c.communeCode) && h.communeCode === c.communeCode));
+      const cHouseholds = hhByCommune.get(c.id) || (c.communeCode ? hhByCommune.get(c.communeCode) : null) || [];
       const officialHHs = cHouseholds.filter(h => h.sampleStatus === 'CHÍNH THỨC' || !h.sampleStatus);
       const totalHH = cHouseholds.length;
       const officialCount = officialHHs.length;
 
-      // Group areas
-      const cAreas = areas.filter(a => a.communeId === c.id || (Boolean(c.communeCode) && (a as any).communeCode === c.communeCode));
+      const cAreas = areasByCommune.get(c.id) || (c.communeCode ? areasByCommune.get(c.communeCode) : null) || [];
 
       // Tính tổng thu nhập và tổng nhân khẩu CHỈ của các hộ đã điều tra
       let totalIncome = 0;
       let totalMembers = 0;
       let surveyedCount = 0;
+      let s1 = 0, s2 = 0, s3 = 0, s4 = 0;
+
       officialHHs.forEach(h => {
+        const sec = Number(h.sectorCode);
+        if (sec === 1) s1++;
+        else if (sec === 2) s2++;
+        else if (sec === 3) s3++;
+        else if (sec === 4) s4++;
+
         if (isHouseholdSurveyed(h)) {
           surveyedCount++;
           totalIncome += calculateHouseholdTotalIncome(h).total;
           totalMembers += (Number(h.membersCount) || 1);
         }
       });
-
-      // Sectors breakdown
-      const s1 = officialHHs.filter(h => Number(h.sectorCode) === 1).length;
-      const s2 = officialHHs.filter(h => Number(h.sectorCode) === 2).length;
-      const s3 = officialHHs.filter(h => Number(h.sectorCode) === 3).length;
-      const s4 = officialHHs.filter(h => Number(h.sectorCode) === 4).length;
 
       // TNBQ / tháng: chia đúng cho tổng nhân khẩu của các hộ đã điều tra
       const perCapitaMonth = totalMembers > 0 ? Math.round(totalIncome / totalMembers / 12) : 0;
@@ -3150,16 +3248,36 @@ export default function App() {
     await handleSaveDepartment(updated);
   };
 
-  const handleBatchAssignArea = async (surveyorId: string, areaIdOrCode: string) => {
+  const handleBatchAssignArea = async (surveyorId: string, areaIdOrCode: string | string[], communeIdsOrCodes?: string[]) => {
     const targetSurveyor = surveyors.find(s => s.id === surveyorId);
     if (!targetSurveyor) return;
 
-    const targetArea = areas.find(a => a.id === areaIdOrCode || a.code === areaIdOrCode);
+    const areaInputList = Array.isArray(areaIdOrCode) ? areaIdOrCode : (areaIdOrCode ? [areaIdOrCode] : []);
+    const targetCommuneSet = new Set<string>(communeIdsOrCodes || []);
+
+    const targetAreas = areas.filter(a => 
+      areaInputList.includes(a.id) || 
+      areaInputList.includes(a.code) || 
+      areaInputList.includes(`${a.communeId}_${a.code}`) ||
+      (communeIdsOrCodes && (communeIdsOrCodes.includes(a.communeId) || (Boolean((a as any).communeCode) && communeIdsOrCodes.includes((a as any).communeCode))))
+    );
+
+    const targetAreaIds = new Set(targetAreas.map(a => a.id));
+    const targetAreaKeys = new Set(targetAreas.map(a => `${a.communeId}_${a.code}`));
+    targetAreas.forEach(a => {
+      if (a.communeId) targetCommuneSet.add(a.communeId);
+      if ((a as any).communeCode) targetCommuneSet.add((a as any).communeCode);
+    });
 
     const updatedHouseholds = households.map(h => {
-      const isMatch = targetArea
-        ? (h.areaId === targetArea.id || (h.areaCode === targetArea.code && (h.communeId === targetArea.communeId || (h as any).communeCode === targetArea.communeCode)))
-        : (h.areaId === areaIdOrCode || h.areaCode === areaIdOrCode);
+      const isMatch = targetAreaIds.has(h.areaId) || 
+        targetAreaKeys.has(`${h.communeId}_${h.areaCode}`) ||
+        areaInputList.includes(h.areaId) ||
+        (targetCommuneSet.size > 0 && (targetCommuneSet.has(h.communeId) || (Boolean(h.communeCode) && targetCommuneSet.has(h.communeCode)))) ||
+        targetAreas.some(a => 
+          (a.id === h.areaId) || 
+          (a.code === h.areaCode && (a.communeId === h.communeId || (a as any).communeCode === h.communeCode))
+        );
       if (isMatch) {
         return {
           ...h,
@@ -3173,22 +3291,30 @@ export default function App() {
     setHouseholds(updatedHouseholds);
     try { localStorage.setItem('cached_households', JSON.stringify(updatedHouseholds)); } catch (e) {}
 
-    // Cập nhật assignedAreas của Điều tra viên (loại bỏ 001 nếu có)
-    const areaIdToAssign = targetArea ? targetArea.id : areaIdOrCode;
-    const prevAssigned = targetSurveyor.assignedAreas || [];
-    const cleanedAssigned = Array.from(new Set([...prevAssigned.filter(item => item !== '001'), areaIdToAssign]));
+    // Cập nhật assignedAreas và assignedCommunes của Điều tra viên/Giám sát viên (loại bỏ 001 nếu có)
+    const newAssignedIds = targetAreas.length > 0 ? targetAreas.map(a => a.id) : areaInputList;
+    const prevAssigned = (targetSurveyor.assignedAreas || []).filter(item => item !== '001');
+    const cleanedAssigned = Array.from(new Set([...prevAssigned, ...newAssignedIds]));
+
+    const prevCommunes = (targetSurveyor.assignedCommunes || []);
+    const cleanedCommunes = Array.from(new Set([...prevCommunes, ...Array.from(targetCommuneSet)]));
+
     const updatedSurveyor: Surveyor = {
       ...targetSurveyor,
       assignedAreas: cleanedAssigned,
+      assignedCommunes: cleanedCommunes.length > 0 ? cleanedCommunes : targetSurveyor.assignedCommunes,
       updatedAt: new Date().toISOString()
     };
     await handleSaveSurveyor(updatedSurveyor);
 
     // Batch update Firestore
     try {
-      const matching = updatedHouseholds.filter(h => targetArea
-        ? (h.areaId === targetArea.id || (h.areaCode === targetArea.code && (h.communeId === targetArea.communeId || (h as any).communeCode === targetArea.communeCode)))
-        : (h.areaId === areaIdOrCode || h.areaCode === areaIdOrCode));
+      const matching = updatedHouseholds.filter(h => 
+        targetAreaIds.has(h.areaId) || 
+        targetAreaKeys.has(`${h.communeId}_${h.areaCode}`) ||
+        areaInputList.includes(h.areaId) ||
+        (targetCommuneSet.size > 0 && (targetCommuneSet.has(h.communeId) || (Boolean(h.communeCode) && targetCommuneSet.has(h.communeCode))))
+      );
       for (let i = 0; i < matching.length; i += 300) {
         const chunk = matching.slice(i, i + 300);
         const batch = writeBatch(db);
@@ -3202,6 +3328,147 @@ export default function App() {
       }
     } catch (e) {
       console.warn("Batch assign area sync notice:", e);
+    }
+  };
+
+  const handleBatchImportAssignments = async (assignments: { surveyorId: string; areaIds: string[]; communeIds: string[] }[]) => {
+    if (assignments.length === 0) return;
+
+    let updatedHouseholds = [...households];
+    const updatedSurveyorsMap = new Map<string, Surveyor>();
+    surveyors.forEach(s => updatedSurveyorsMap.set(s.id, { ...s }));
+
+    assignments.forEach(({ surveyorId, areaIds, communeIds }) => {
+      const surv = updatedSurveyorsMap.get(surveyorId);
+      if (!surv) return;
+
+      const targetCommuneSet = new Set(communeIds);
+      const targetAreas = areas.filter(a => 
+        areaIds.includes(a.id) || 
+        areaIds.includes(a.code) || 
+        areaIds.includes(`${a.communeId}_${a.code}`) ||
+        targetCommuneSet.has(a.communeId) || 
+        (Boolean((a as any).communeCode) && targetCommuneSet.has((a as any).communeCode))
+      );
+      const targetAreaIds = new Set(targetAreas.map(a => a.id));
+      const targetAreaKeys = new Set(targetAreas.map(a => `${a.communeId}_${a.code}`));
+      targetAreas.forEach(a => {
+        if (a.communeId) targetCommuneSet.add(a.communeId);
+        if ((a as any).communeCode) targetCommuneSet.add((a as any).communeCode);
+      });
+
+      updatedHouseholds = updatedHouseholds.map(h => {
+        const isMatch = targetAreaIds.has(h.areaId) || 
+          targetAreaKeys.has(`${h.communeId}_${h.areaCode}`) ||
+          areaIds.includes(h.areaId) ||
+          (targetCommuneSet.size > 0 && (targetCommuneSet.has(h.communeId) || (Boolean(h.communeCode) && targetCommuneSet.has(h.communeCode)))) ||
+          targetAreas.some(a => 
+            (a.id === h.areaId) || 
+            (a.code === h.areaCode && (a.communeId === h.communeId || (a as any).communeCode === h.communeCode))
+          );
+        if (isMatch) {
+          return {
+            ...h,
+            assignedSurveyorId: surv.id,
+            assignedSurveyorName: surv.name
+          };
+        }
+        return h;
+      });
+
+      const newAssignedIds = targetAreas.length > 0 ? targetAreas.map(a => a.id) : areaIds;
+      const prevAreas = (surv.assignedAreas || []).filter(item => item !== '001');
+      surv.assignedAreas = Array.from(new Set([...prevAreas, ...newAssignedIds]));
+
+      const prevCommunes = (surv.assignedCommunes || []);
+      surv.assignedCommunes = Array.from(new Set([...prevCommunes, ...Array.from(targetCommuneSet)]));
+      surv.updatedAt = new Date().toISOString();
+      updatedSurveyorsMap.set(surveyorId, surv);
+    });
+
+    setHouseholds(updatedHouseholds);
+    try { localStorage.setItem('cached_households', JSON.stringify(updatedHouseholds)); } catch (e) {}
+
+    // Save all updated surveyors
+    for (const surv of updatedSurveyorsMap.values()) {
+      await handleSaveSurveyor(surv);
+    }
+
+    // Batch update Firestore for matching households
+    try {
+      const assignedHouseholds = updatedHouseholds.filter(h => Boolean(h.assignedSurveyorId));
+      for (let i = 0; i < assignedHouseholds.length; i += 300) {
+        const chunk = assignedHouseholds.slice(i, i + 300);
+        const batch = writeBatch(db);
+        chunk.forEach(h => {
+          batch.update(doc(db, 'households', h.id), {
+            assignedSurveyorId: h.assignedSurveyorId,
+            assignedSurveyorName: h.assignedSurveyorName
+          });
+        });
+        await batch.commit();
+      }
+    } catch (e) {
+      console.warn("Batch import permissions sync notice:", e);
+    }
+  };
+
+  const handleUnassignArea = async (surveyorId: string, areaIdOrCode: string) => {
+    const targetSurveyor = surveyors.find(s => s.id === surveyorId);
+    if (!targetSurveyor) return;
+
+    const targetArea = areas.find(a => a.id === areaIdOrCode || a.code === areaIdOrCode || `${a.communeId}_${a.code}` === areaIdOrCode);
+
+    const updatedHouseholds = households.map(h => {
+      const isMatch = targetArea
+        ? (h.areaId === targetArea.id || (h.areaCode === targetArea.code && (h.communeId === targetArea.communeId || (h as any).communeCode === targetArea.communeCode)))
+        : (h.areaId === areaIdOrCode || h.areaCode === areaIdOrCode);
+      if (isMatch && h.assignedSurveyorId === surveyorId) {
+        return {
+          ...h,
+          assignedSurveyorId: '',
+          assignedSurveyorName: ''
+        };
+      }
+      return h;
+    });
+
+    setHouseholds(updatedHouseholds);
+    try { localStorage.setItem('cached_households', JSON.stringify(updatedHouseholds)); } catch (e) {}
+
+    const remainingAreas = (targetSurveyor.assignedAreas || []).filter(item => 
+      item !== areaIdOrCode && 
+      item !== targetArea?.id && 
+      item !== targetArea?.code &&
+      item !== `${targetArea?.communeId}_${targetArea?.code}`
+    );
+
+    const updatedSurveyor: Surveyor = {
+      ...targetSurveyor,
+      assignedAreas: remainingAreas,
+      updatedAt: new Date().toISOString()
+    };
+    await handleSaveSurveyor(updatedSurveyor);
+
+    try {
+      const matching = updatedHouseholds.filter(h => 
+        targetArea
+          ? (h.areaId === targetArea.id || (h.areaCode === targetArea.code && (h.communeId === targetArea.communeId || (h as any).communeCode === targetArea.communeCode)))
+          : (h.areaId === areaIdOrCode || h.areaCode === areaIdOrCode)
+      );
+      for (let i = 0; i < matching.length; i += 300) {
+        const chunk = matching.slice(i, i + 300);
+        const batch = writeBatch(db);
+        chunk.forEach(h => {
+          batch.update(doc(db, 'households', h.id), {
+            assignedSurveyorId: '',
+            assignedSurveyorName: ''
+          });
+        });
+        await batch.commit();
+      }
+    } catch (e) {
+      console.warn("Unassign area sync notice:", e);
     }
   };
 
@@ -4542,9 +4809,55 @@ export default function App() {
                       {areaNameDisplay}
                     </td>
 
-                    {/* Surveyor Assignment Column - Plain Text */}
+                    {/* Surveyor Assignment Column - Interactive Link with Progress Tab */}
                     <td className="border border-slate-300 p-2 text-left text-slate-800">
-                      {h.assignedSurveyorName || '---'}
+                      {(() => {
+                        const areaSurv = areaSurveyorMap.get(h.areaId) || areaSurveyorMap.get(h.areaCode) || areaSurveyorMap.get(`${h.communeId}_${h.areaCode}`);
+                        const effectiveSurveyorName = h.assignedSurveyorName || areaSurv?.name || '';
+                        
+                        if (!effectiveSurveyorName) {
+                          return <span className="text-slate-400 italic text-[11px]">Chưa phân công</span>;
+                        }
+
+                        return (
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (selectedSurveyorFilter === effectiveSurveyorName) {
+                                  setSelectedSurveyorFilter('ALL');
+                                  showNotification('success', 'Đã hủy lọc theo ĐTV.');
+                                } else {
+                                  setSelectedSurveyorFilter(effectiveSurveyorName);
+                                  setCurrentPage(1);
+                                  showNotification('success', `Đã lọc danh sách theo Người nhập / ĐTV: "${effectiveSurveyorName}".`);
+                                }
+                              }}
+                              className={`px-2 py-0.5 rounded text-[11px] font-semibold cursor-pointer transition-all flex items-center gap-1 border shadow-2xs ${
+                                selectedSurveyorFilter === effectiveSurveyorName
+                                  ? 'bg-purple-700 text-white border-purple-800 font-bold'
+                                  : 'bg-purple-50 hover:bg-purple-100 text-purple-950 border-purple-200'
+                              }`}
+                              title={`Bấm để ${selectedSurveyorFilter === effectiveSurveyorName ? 'bỏ lọc' : 'lọc danh sách'} theo ĐTV "${effectiveSurveyorName}"`}
+                            >
+                              <UserCheck className={`w-3 h-3 ${selectedSurveyorFilter === effectiveSurveyorName ? 'text-white' : 'text-purple-700'}`} />
+                              <span>{effectiveSurveyorName}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setActiveTab('surveyor_progress');
+                                showNotification('success', `Đã chuyển sang xem Tiến độ của ĐTV: "${effectiveSurveyorName}".`);
+                              }}
+                              className="p-1 text-slate-400 hover:text-teal-700 hover:bg-teal-50 rounded transition-colors cursor-pointer"
+                              title={`Xem chi tiết tiến độ hoàn thành của "${effectiveSurveyorName}" tại Tab 3: Tiến độ ĐTV`}
+                            >
+                              <TrendingUp className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </td>
 
                     {/* Survey Status Column - Plain Text */}
@@ -5321,6 +5634,35 @@ export default function App() {
               </div>
             )}
 
+            {/* 5. Người nhập / ĐTV */}
+            {activeTab !== 'import' && (
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-slate-700">ĐTV:</span>
+                <select 
+                  value={selectedSurveyorFilter} 
+                  onChange={e => {
+                    setSelectedSurveyorFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
+                  className={`h-8 w-36 bg-white border rounded px-2 font-semibold text-xs focus:outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer shadow-2xs ${
+                    selectedSurveyorFilter !== 'ALL'
+                      ? 'border-purple-600 text-purple-950 bg-purple-50 font-bold'
+                      : 'border-slate-300 text-slate-800'
+                  }`}
+                >
+                  <option value="ALL">Tất cả ĐTV</option>
+                  <option value="UNASSIGNED">-- Chưa phân công --</option>
+                  {surveyors
+                    .filter(s => s.role === 'SURVEYOR' || s.role === 'SUPERVISOR')
+                    .map(s => (
+                      <option key={s.id} value={s.name}>
+                        {s.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
+
             {/* 5. Tìm kiếm (Ẩn ở trang Tải bảng kê theo yêu cầu) */}
             {activeTab !== 'import' && (
               <div className="flex items-center gap-1.5 bg-white border border-slate-300 rounded px-2.5 h-8 shadow-2xs">
@@ -5829,6 +6171,7 @@ export default function App() {
             onOpenHouseholdForm={(hh) => {
               setActiveHouseholdForm(hh);
             }}
+            onNavigateToHouseholdEntry={handleNavigateToHouseholdEntryFromProgress}
             showNotification={showNotification}
           />
         )}
@@ -7029,6 +7372,8 @@ export default function App() {
             onSaveDepartment={handleSaveDepartment}
             onDeleteDepartment={handleDeleteDepartment}
             onBatchAssignArea={handleBatchAssignArea}
+            onUnassignArea={handleUnassignArea}
+            onBatchImportAssignments={handleBatchImportAssignments}
             onBatchAssignDepartmentArea={handleBatchAssignDepartmentArea}
             onSelectActiveUser={(s) => {
               handleResetFilters();
