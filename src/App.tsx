@@ -3310,7 +3310,7 @@ export default function App() {
       const matching = updatedHouseholds.filter(h => 
         targetAreaIds.has(h.areaId) || 
         targetAreaKeys.has(`${h.communeId}_${h.areaCode}`) ||
-        areaInputList.includes(h.areaId) ||
+        selectedAreaIds.includes(h.areaId) ||
         (targetCommuneSet.size > 0 && (targetCommuneSet.has(h.communeId) || (Boolean(h.communeCode) && targetCommuneSet.has(h.communeCode))))
       );
       for (let i = 0; i < matching.length; i += 300) {
