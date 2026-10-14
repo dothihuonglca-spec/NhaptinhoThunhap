@@ -151,7 +151,7 @@ export const SurveyorProgressView: React.FC<SurveyorProgressViewProps> = ({
     return rawName;
   };
 
-  // Xây dựng danh sách tiến độ theo từng Địa bàn (Area) - Chỉ tính 10 hộ chính thức mỗi địa bàn
+  // Xây dựng danh sách tiến độ theo từng Địa bàn (Area) - Chỉ tính 10 hộ chính thức mỗi địa bàn (Tối ưu O(N) hiệu năng cao không bị đơ)
   const areaProgressList: AreaProgressItem[] = useMemo(() => {
     let effectiveAreas = [...areas];
     if (effectiveAreas.length === 0 && households.length > 0) {
@@ -202,15 +202,45 @@ export const SurveyorProgressView: React.FC<SurveyorProgressViewProps> = ({
       }
     }
 
+    // Pre-index households and communes for O(1) lightning fast lookups
+    const hhByAreaId = new Map<string, Household[]>();
+    const hhByCommuneAndAreaCode = new Map<string, Household[]>();
+    const hhByAreaCode = new Map<string, Household[]>();
+
+    households.forEach(h => {
+      if (h.areaId) {
+        if (!hhByAreaId.has(h.areaId)) hhByAreaId.set(h.areaId, []);
+        hhByAreaId.get(h.areaId)!.push(h);
+      }
+      if (h.areaCode) {
+        if (!hhByAreaCode.has(h.areaCode)) hhByAreaCode.set(h.areaCode, []);
+        hhByAreaCode.get(h.areaCode)!.push(h);
+
+        const cKey = `${h.communeId || h.communeCode || 'default'}_${h.areaCode}`;
+        if (!hhByCommuneAndAreaCode.has(cKey)) hhByCommuneAndAreaCode.set(cKey, []);
+        hhByCommuneAndAreaCode.get(cKey)!.push(h);
+      }
+    });
+
+    const communeMap = new Map<string, Commune>();
+    communes.forEach(c => {
+      if (c.id) communeMap.set(c.id, c);
+      if (c.communeCode) communeMap.set(c.communeCode, c);
+    });
+
     return effectiveAreas.map(area => {
-      const commune = communes.find(c => c.id === area.communeId || c.communeCode === (area as any).communeCode || c.communeCode === area.communeCode);
+      const commune = communeMap.get(area.communeId) || communeMap.get((area as any).communeCode);
       
-      // Lọc các hộ thuộc địa bàn này
-      const allAreaHHs = households.filter(h => {
-        if (h.areaId === area.id) return true;
-        if (h.areaCode === area.code && (h.communeId === area.communeId || (h as any).communeCode === area.communeCode || (commune && (h.communeId === commune.id || h.communeCode === commune.communeCode)))) return true;
-        return false;
-      });
+      const cKey = `${area.communeId || commune?.id || 'default'}_${area.code}`;
+      let allAreaHHs = hhByCommuneAndAreaCode.get(cKey) || hhByAreaId.get(area.id) || hhByAreaCode.get(area.code) || [];
+
+      if (allAreaHHs.length === 0) {
+        allAreaHHs = households.filter(h => {
+          if (h.areaId === area.id) return true;
+          if (h.areaCode === area.code && (h.communeId === area.communeId || (h as any).communeCode === area.communeCode || (commune && (h.communeId === commune.id || h.communeCode === commune.communeCode)))) return true;
+          return false;
+        });
+      }
 
       // Chỉ tính tối đa 10 hộ chính thức mỗi địa bàn (bỏ qua hộ dự phòng để tính tiến độ chuẩn 10 hộ/địa bàn)
       const officialHHs = allAreaHHs.filter(h => (h.sampleStatus || 'CHÍNH THỨC') !== 'DỰ PHÒNG').slice(0, 10);
@@ -224,7 +254,7 @@ export const SurveyorProgressView: React.FC<SurveyorProgressViewProps> = ({
       const unenteredHouseholds = totalHouseholds - (doneTotal + inProgressHouseholds);
       const completionRate = totalHouseholds > 0 ? Math.round((doneTotal / totalHouseholds) * 100) : 0;
 
-      // Tìm tên người nhập / ĐTV phụ trách địa bàn này (tự động nhảy theo phân quyền thực tế)
+      // Tìm tên người nhập / ĐTV phụ trách địa bàn này
       const surveyorSet = new Set<string>();
       assignedHHs.forEach(h => {
         if (h.assignedSurveyorName) surveyorSet.add(h.assignedSurveyorName);
@@ -243,7 +273,13 @@ export const SurveyorProgressView: React.FC<SurveyorProgressViewProps> = ({
       });
 
       const surveyorNamesStr = surveyorSet.size > 0 ? Array.from(surveyorSet).join(', ') : '---';
-      const areaNameFinal = getAreaDisplayName(area.id, area.communeId);
+      
+      const areaNameFinal = 
+        (area.name && area.name.trim() && area.name !== '001' && area.name !== '001' && area.name !== 'Địa bàn' && !area.name.startsWith('Địa bàn 001'))
+          ? area.name.trim()
+          : (allAreaHHs.find(h => (h as any).sheetName && (h as any).sheetName.trim() && (h as any).sheetName !== '001' && (h as any).sheetName !== 'Địa bàn' && !(h as any).sheetName.startsWith('Địa bàn 001')) as any)?.sheetName?.trim()
+          || (allAreaHHs.find(h => h.areaName && h.areaName.trim() && h.areaName !== '001' && h.areaName !== 'Địa bàn' && h.areaName !== h.areaCode && !h.areaName.startsWith('Địa bàn 001')) as any)?.areaName?.trim()
+          || `Địa bàn ${area.code}`;
 
       return {
         id: area.id,
@@ -264,7 +300,7 @@ export const SurveyorProgressView: React.FC<SurveyorProgressViewProps> = ({
         householdsList: assignedHHs
       };
     });
-  }, [areas, communes, households, surveyors]);
+  }, [areas, communes, households, surveyors, currentUser]);
 
   // Lọc danh sách theo bộ lọc
   const filteredProgressList = useMemo(() => {
