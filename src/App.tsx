@@ -228,29 +228,14 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   
   // Real Login & Authentication States
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem('is_user_authenticated') === 'true';
-    } catch (e) {
-      return false;
-    }
-  });
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState<boolean>(false);
 
   useEffect(() => {
-    try {
-      const savedAuth = localStorage.getItem('is_user_authenticated');
-      const savedSurveyorId = localStorage.getItem('active_surveyor_id');
-      if (savedAuth === 'true' && savedSurveyorId) {
-        setIsLoggedIn(true);
-        setCurrentSurveyorId(savedSurveyorId);
-      }
-    } catch (e) {}
-
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
-        setIsLoggedIn(true);
+        // user authenticated via Firebase auth if needed
       }
     });
     return () => unsubscribe();
@@ -3751,7 +3736,10 @@ export default function App() {
   const handleLogout = () => {
     handleResetFilters();
     setIsLoggedIn(false);
-    try { localStorage.setItem('is_user_authenticated', 'false'); } catch (e) {}
+    try { 
+      localStorage.setItem('is_user_authenticated', 'false');
+      localStorage.removeItem('active_surveyor_id');
+    } catch (e) {}
     showNotification('success', 'Đã đăng xuất khỏi tài khoản.');
   };
 
