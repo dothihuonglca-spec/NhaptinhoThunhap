@@ -9,9 +9,15 @@ import {
   Unlock, Edit3, Trash2, MapPin, Check, AlertCircle, Save, 
   X, Search, UserCheck, RefreshCw, Layers, KeyRound, Eye, EyeOff,
   Building2, Briefcase, Phone, Mail, FileText, CheckSquare, Sparkles,
-  ArrowRight, ShieldAlert, BadgeHelp
+  ArrowRight, ShieldAlert, BadgeHelp, ChevronDown, Square, SlidersHorizontal, Table,
+  Download, Upload, FileSpreadsheet
 } from 'lucide-react';
 import { Surveyor, UserRole, Department, ROLE_LABELS } from '../types/user';
+import { 
+  exportPermissionExcelTemplate, 
+  parsePermissionExcelFile, 
+  ParsedPermissionResult 
+} from '../utils/permissionExcelHelper';
 
 interface SurveyArea {
   id: string;
@@ -49,7 +55,9 @@ interface SurveyorManagementProps {
   onDeleteSurveyor: (id: string) => Promise<void>;
   onSaveDepartment: (department: Department) => Promise<void>;
   onDeleteDepartment: (id: string) => Promise<void>;
-  onBatchAssignArea: (surveyorId: string, areaCode: string) => Promise<void>;
+  onBatchAssignArea: (surveyorId: string, areaCode: string | string[], communeIdsOrCodes?: string[]) => Promise<void>;
+  onUnassignArea?: (surveyorId: string, areaIdOrCode: string) => Promise<void>;
+  onBatchImportAssignments?: (assignments: { surveyorId: string; areaIds: string[]; communeIds: string[] }[]) => Promise<void>;
   onBatchAssignDepartmentArea: (departmentId: string, areaCodes: string[]) => Promise<void>;
   onSelectActiveUser: (surveyor: Surveyor) => void;
   showNotification: (type: 'success' | 'error', msg: string) => void;
@@ -69,16 +77,21 @@ export default function SurveyorManagement({
   onSaveDepartment,
   onDeleteDepartment,
   onBatchAssignArea,
+  onUnassignArea,
+  onBatchImportAssignments,
   onBatchAssignDepartmentArea,
   onSelectActiveUser,
   showNotification,
   onSyncFirebase,
   isSyncing = false
 }: SurveyorManagementProps) {
-  const [subTab, setSubTab] = useState<'departments' | 'surveyors'>('surveyors');
+  const [subTab, setSubTab] = useState<'departments' | 'surveyors' | 'permissions'>('surveyors');
+  const [viewMode, setViewMode] = useState<'grid_areas' | 'summary_accounts'>('grid_areas');
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
   const [deptFilter, setDeptFilter] = useState<string>('ALL');
+  const [gridTkcsFilter, setGridTkcsFilter] = useState<string>('ALL');
+  const [gridCommuneFilter, setGridCommuneFilter] = useState<string>('ALL');
   
   // Surveyor Add/Edit Modal
   const [editingSurveyor, setEditingSurveyor] = useState<Surveyor | null>(null);
@@ -89,10 +102,12 @@ export default function SurveyorManagement({
   const [isDeptModalOpen, setIsDeptModalOpen] = useState(false);
 
   // Quick assignment state
-  const [quickAssignCommuneId, setQuickAssignCommuneId] = useState<string>(communes[0]?.id || 'ALL');
-  const [surveyorCommuneFilter, setSurveyorCommuneFilter] = useState<string>('ALL');
   const [assignSurveyorId, setAssignSurveyorId] = useState<string>(surveyors[0]?.id || '');
-  const [assignAreaCode, setAssignAreaCode] = useState<string>(areas[0]?.code || '');
+  const [quickAssignTkcs, setQuickAssignTkcs] = useState<string>('ALL');
+  const [quickAssignCommuneId, setQuickAssignCommuneId] = useState<string>('ALL');
+  const [quickAssignSelectedAreaIds, setQuickAssignSelectedAreaIds] = useState<string[]>([]);
+  const [isAreaDropdownOpen, setIsAreaDropdownOpen] = useState(false);
+  const [surveyorCommuneFilter, setSurveyorCommuneFilter] = useState<string>('ALL');
   const [isAssigning, setIsAssigning] = useState(false);
 
   // Department quick assign state
@@ -188,13 +203,6 @@ export default function SurveyorManagement({
 
   useEffect(() => {
     if (communes.length > 0) {
-      if (quickAssignCommuneId === 'ALL') {
-        setQuickAssignCommuneId(communes[0].id);
-        const matchingArs = areas.filter(a => a.communeId === communes[0].id || (a as any).communeCode === communes[0].communeCode);
-        if (matchingArs.length > 0) {
-          setAssignAreaCode(matchingArs[0].code);
-        }
-      }
       if (modalAreaCommuneFilter === 'ALL') {
         setModalAreaCommuneFilter(communes[0].id);
       }
@@ -439,22 +447,111 @@ export default function SurveyorManagement({
     }
   };
 
+  const quickAssignFilteredCommunes = React.useMemo(() => {
+    if (quickAssignTkcs === 'ALL') return allowedSupervisorCommunes;
+    return allowedSupervisorCommunes.filter(c => (c.tkcsCode || 'TKCS-01') === quickAssignTkcs);
+  }, [allowedSupervisorCommunes, quickAssignTkcs]);
+
+  const quickAssignAvailableAreas = React.useMemo(() => {
+    return allowedSupervisorAreas.filter(a => {
+      const commObj = allowedSupervisorCommunes.find(c => c.id === a.communeId || c.communeCode === (a as any).communeCode);
+      if (quickAssignTkcs !== 'ALL' && commObj && (commObj.tkcsCode || 'TKCS-01') !== quickAssignTkcs) {
+        return false;
+      }
+      if (quickAssignCommuneId === 'ALL') return true;
+      return a.communeId === quickAssignCommuneId || (a as any).communeCode === quickAssignCommuneId;
+    });
+  }, [allowedSupervisorAreas, allowedSupervisorCommunes, quickAssignTkcs, quickAssignCommuneId]);
+
+  const handleToggleSelectAllQuickAreas = () => {
+    const allIds = quickAssignAvailableAreas.map(a => a.id);
+    const allSelected = allIds.length > 0 && allIds.every(id => quickAssignSelectedAreaIds.includes(id));
+    if (allSelected) {
+      setQuickAssignSelectedAreaIds(quickAssignSelectedAreaIds.filter(id => !allIds.includes(id)));
+    } else {
+      setQuickAssignSelectedAreaIds(Array.from(new Set([...quickAssignSelectedAreaIds, ...allIds])));
+    }
+  };
+
+  const handleToggleQuickArea = (areaId: string) => {
+    if (quickAssignSelectedAreaIds.includes(areaId)) {
+      setQuickAssignSelectedAreaIds(quickAssignSelectedAreaIds.filter(id => id !== areaId));
+    } else {
+      setQuickAssignSelectedAreaIds([...quickAssignSelectedAreaIds, areaId]);
+    }
+  };
+
   const handleExecuteBatchAssign = async () => {
-    if (!assignSurveyorId || !assignAreaCode) {
-      showNotification('error', 'Vui lòng chọn Điều tra viên và Địa bàn cần phân công.');
+    if (!assignSurveyorId) {
+      showNotification('error', 'Vui lòng chọn Cán bộ / Điều tra viên cần phân công.');
+      return;
+    }
+    const areaIdsToAssign = quickAssignSelectedAreaIds.length > 0 
+      ? quickAssignSelectedAreaIds 
+      : quickAssignAvailableAreas.map(a => a.id);
+
+    if (areaIdsToAssign.length === 0) {
+      showNotification('error', 'Không có địa bàn nào phù hợp với bộ lọc để phân công.');
       return;
     }
     const targetSurveyor = surveyors.find(s => s.id === assignSurveyorId);
     if (!targetSurveyor) return;
 
+    const communeIdsToAssign = quickAssignFilteredCommunes.map(c => c.id);
+
     try {
       setIsAssigning(true);
-      await onBatchAssignArea(assignSurveyorId, assignAreaCode);
-      showNotification('success', `Đã phân công toàn bộ hộ thuộc Địa bàn ${assignAreaCode} cho ${targetSurveyor.name}.`);
+      await onBatchAssignArea(
+        assignSurveyorId, 
+        areaIdsToAssign, 
+        quickAssignCommuneId === 'ALL' ? communeIdsToAssign : [quickAssignCommuneId]
+      );
+      showNotification('success', `Đã phân công thành công ${areaIdsToAssign.length} địa bàn cho ${targetSurveyor.name}!`);
+      setIsAreaDropdownOpen(false);
     } catch (err: any) {
       showNotification('error', 'Lỗi phân công địa bàn: ' + err.message);
     } finally {
       setIsAssigning(false);
+    }
+  };
+
+  const handleExportTemplate = () => {
+    try {
+      exportPermissionExcelTemplate(communes, areas, surveyors, households);
+      showNotification('success', 'Đã tải xuống file mẫu Excel phân công và phân quyền thành công.');
+    } catch (err: any) {
+      showNotification('error', 'Lỗi khi xuất file mẫu: ' + err.message);
+    }
+  };
+
+  const handleImportExcelFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsAssigning(true);
+      const result = await parsePermissionExcelFile(file, communes, areas, surveyors);
+      if (result.assignments.length === 0) {
+        showNotification('error', 'Không tìm thấy dữ liệu phân công hợp lệ trong file Excel.');
+        return;
+      }
+      if (onBatchImportAssignments) {
+        const importPayload = result.assignments.map(a => ({
+          surveyorId: a.surveyor.id,
+          areaIds: a.areaIds,
+          communeIds: a.communeIds
+        }));
+        await onBatchImportAssignments(importPayload);
+      }
+      let msg = `Đã phân công thành công từ Excel cho ${result.assignments.length} cán bộ (${result.validRows} địa bàn).`;
+      if (result.warnings.length > 0) {
+        msg += ` Cảnh báo: ${result.warnings.length} dòng có vấn đề.`;
+      }
+      showNotification('success', msg);
+    } catch (err: any) {
+      showNotification('error', 'Lỗi khi đọc file Excel phân quyền: ' + err.message);
+    } finally {
+      setIsAssigning(false);
+      e.target.value = '';
     }
   };
 
@@ -523,6 +620,148 @@ export default function SurveyorManagement({
     return true;
   });
 
+  interface AssignmentGridItem {
+    rowKey: string;
+    surveyor: Surveyor;
+    tkcsCode: string;
+    tkcsName: string;
+    communeName: string;
+    communeCode: string;
+    username: string;
+    fullName: string;
+    departmentName: string;
+    roleLabel: string;
+    role: UserRole;
+    areaDisplayName: string;
+    areaCode: string;
+    areaId?: string;
+    isAssignedArea: boolean;
+    totalHh: number;
+    completedHh: number;
+  }
+
+  const assignmentGridRows = React.useMemo(() => {
+    const rows: AssignmentGridItem[] = [];
+
+    // Pre-calculate household counts by area & surveyor for instant rendering
+    const hhByAreaSurveyor = new Map<string, { total: number; completed: number }>();
+    households.forEach(h => {
+      const sId = h.assignedSurveyorId || '';
+      const isDone = h.surveyStatus === 'DA_HOAN_THANH' || h.surveyStatus === 'DA_DUYET';
+      
+      const keyId = `${h.areaId}_${sId}`;
+      const keyCode = `${h.communeId || (h as any).communeCode}_${h.areaCode}_${sId}`;
+      
+      const prev1 = hhByAreaSurveyor.get(keyId) || { total: 0, completed: 0 };
+      hhByAreaSurveyor.set(keyId, { total: prev1.total + 1, completed: prev1.completed + (isDone ? 1 : 0) });
+      
+      const prev2 = hhByAreaSurveyor.get(keyCode) || { total: 0, completed: 0 };
+      hhByAreaSurveyor.set(keyCode, { total: prev2.total + 1, completed: prev2.completed + (isDone ? 1 : 0) });
+    });
+
+    filteredSurveyors.forEach(s => {
+      const matchedDept = departments.find(d => d.id === s.departmentId || d.name === s.department);
+      const deptName = matchedDept ? `${matchedDept.code} - ${matchedDept.name}` : (s.department || 'Chưa chọn');
+      const roleConfig = ROLE_LABELS[s.role] || ROLE_LABELS.SURVEYOR;
+
+      const cleanedAreas = (s.assignedAreas || []).filter(item => item !== '001');
+
+      if (cleanedAreas.length > 0 && !cleanedAreas.includes('ALL')) {
+        cleanedAreas.forEach(areaKey => {
+          const matchedArea = areas.find(a => a.id === areaKey || a.code === areaKey || `${a.communeId}_${a.code}` === areaKey);
+          const matchedCommune = matchedArea ? communes.find(c => c.id === matchedArea.communeId || c.communeCode === (matchedArea as any).communeCode) : undefined;
+          
+          const tkcsCode = matchedCommune?.tkcsCode || 'TKCS-01';
+          const tkcsName = matchedCommune?.tkcsName || 'Thống kê cơ sở';
+          const communeName = matchedCommune?.communeName || (matchedArea ? `Xã mã ${matchedArea.communeId}` : '---');
+          const communeCode = matchedCommune?.communeCode || (matchedArea ? String(matchedArea.communeId) : '---');
+          const areaDisplayName = matchedArea ? getAreaDisplayName(matchedArea.id, matchedArea.communeId) : `Địa bàn ${areaKey}`;
+          const areaCode = matchedArea?.code || areaKey;
+
+          const stats = (matchedArea ? hhByAreaSurveyor.get(`${matchedArea.id}_${s.id}`) : null) || 
+                        (matchedArea ? hhByAreaSurveyor.get(`${matchedArea.communeId}_${matchedArea.code}_${s.id}`) : null) ||
+                        { total: 0, completed: 0 };
+
+          rows.push({
+            rowKey: `${s.id}_${areaKey}`,
+            surveyor: s,
+            tkcsCode,
+            tkcsName: `${tkcsCode} - ${tkcsName}`,
+            communeName,
+            communeCode,
+            username: s.code,
+            fullName: s.name,
+            departmentName: deptName,
+            roleLabel: roleConfig.label,
+            role: s.role,
+            areaDisplayName: `${areaDisplayName} (ĐB ${areaCode})`,
+            areaCode,
+            areaId: matchedArea?.id || areaKey,
+            isAssignedArea: true,
+            totalHh: stats.total,
+            completedHh: stats.completed
+          });
+        });
+      } else if (cleanedAreas.includes('ALL')) {
+        rows.push({
+          rowKey: `${s.id}_ALL`,
+          surveyor: s,
+          tkcsCode: 'Tất cả',
+          tkcsName: 'Tất cả TKCS',
+          communeName: 'Toàn bộ xã phụ trách',
+          communeCode: 'ALL',
+          username: s.code,
+          fullName: s.name,
+          departmentName: deptName,
+          roleLabel: roleConfig.label,
+          role: s.role,
+          areaDisplayName: 'Toàn bộ địa bàn trong xã',
+          areaCode: 'ALL',
+          isAssignedArea: true,
+          totalHh: households.filter(h => h.assignedSurveyorId === s.id).length,
+          completedHh: households.filter(h => h.assignedSurveyorId === s.id && (h.surveyStatus === 'DA_HOAN_THANH' || h.surveyStatus === 'DA_DUYET')).length
+        });
+      } else {
+        rows.push({
+          rowKey: `${s.id}_none`,
+          surveyor: s,
+          tkcsCode: '---',
+          tkcsName: '---',
+          communeName: '---',
+          communeCode: '---',
+          username: s.code,
+          fullName: s.name,
+          departmentName: deptName,
+          roleLabel: roleConfig.label,
+          role: s.role,
+          areaDisplayName: 'Chưa phân công địa bàn',
+          areaCode: '---',
+          isAssignedArea: false,
+          totalHh: 0,
+          completedHh: 0
+        });
+      }
+    });
+
+    return rows;
+  }, [filteredSurveyors, departments, areas, communes, households]);
+
+  const filteredGridRows = React.useMemo(() => {
+    return assignmentGridRows.filter(row => {
+      if (gridTkcsFilter !== 'ALL') {
+        if (row.tkcsCode !== '---' && row.tkcsCode !== 'Tất cả' && row.tkcsCode !== gridTkcsFilter) {
+          return false;
+        }
+      }
+      if (gridCommuneFilter !== 'ALL') {
+        if (row.communeCode !== '---' && row.communeCode !== 'ALL' && row.communeCode !== gridCommuneFilter) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [assignmentGridRows, gridTkcsFilter, gridCommuneFilter]);
+
   return (
     <div className="flex flex-col gap-4 w-full">
       {/* Firebase Sync & Quota Info Card */}
@@ -578,6 +817,18 @@ export default function SurveyorManagement({
             <div className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-1">
               <button
                 type="button"
+                onClick={() => setSubTab('surveyors')}
+                className={`px-3.5 py-1.5 rounded-md font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                  subTab === 'surveyors' 
+                    ? 'bg-sky-800 text-white shadow-xs' 
+                    : 'text-slate-700 hover:text-slate-900'
+                }`}
+              >
+                <Users className="w-4 h-4" />
+                <span>Phân công ĐTV & Địa bàn ({surveyors.length})</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setSubTab('departments')}
                 className={`px-3.5 py-1.5 rounded-md font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
                   subTab === 'departments' 
@@ -590,15 +841,15 @@ export default function SurveyorManagement({
               </button>
               <button
                 type="button"
-                onClick={() => setSubTab('surveyors')}
+                onClick={() => setSubTab('permissions')}
                 className={`px-3.5 py-1.5 rounded-md font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
-                  subTab === 'surveyors' 
+                  subTab === 'permissions' 
                     ? 'bg-sky-800 text-white shadow-xs' 
                     : 'text-slate-700 hover:text-slate-900'
                 }`}
               >
-                <Users className="w-4 h-4" />
-                <span>Tài khoản ĐTV ({surveyors.length})</span>
+                <ShieldCheck className="w-4 h-4" />
+                <span>Bảng Phân Quyền & Vai Trò</span>
               </button>
             </div>
           ) : null}
@@ -889,18 +1140,19 @@ export default function SurveyorManagement({
               <div>
                 <h4 className="font-bold text-sky-950">Phân công nhanh toàn bộ hộ theo Địa bàn</h4>
                 <p className="text-slate-600 text-[11px]">
-                  Gán nhanh toàn bộ danh sách hộ thuộc một địa bàn cho Cán bộ / ĐTV phụ trách nhập phiếu.
+                  Gán nhanh danh sách hộ thuộc một hoặc nhiều địa bàn cho Cán bộ / ĐTV phụ trách nhập phiếu.
                 </p>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+              {/* 1. Gán cho */}
               <div className="flex items-center gap-1.5">
                 <span className="text-slate-700 font-medium">Gán cho:</span>
                 <select
                   value={assignSurveyorId}
                   onChange={e => setAssignSurveyorId(e.target.value)}
-                  className="bg-white border border-slate-300 rounded px-2.5 py-1.5 font-bold text-slate-900"
+                  className="bg-white border border-slate-300 rounded px-2.5 py-1.5 font-bold text-slate-900 focus:outline-sky-500"
                 >
                   {filteredSurveyors.map(s => (
                     <option key={s.id} value={s.id}>
@@ -910,26 +1162,43 @@ export default function SurveyorManagement({
                 </select>
               </div>
 
-              {/* Lọc theo xã để chỉ hiện địa bàn của xã đó */}
+              {/* 2. Lọc theo TKCS - Thêm sau nút lọc Gán cho */}
               <div className="flex items-center gap-1.5">
-                <span className="text-slate-700 font-bold text-sky-950">Lọc theo Xã:</span>
+                <span className="text-slate-700 font-medium">Lọc theo TKCS:</span>
+                <select
+                  value={quickAssignTkcs}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setQuickAssignTkcs(val);
+                    setQuickAssignSelectedAreaIds([]);
+                  }}
+                  className="bg-white border border-slate-300 rounded px-2.5 py-1.5 font-bold text-slate-900 focus:outline-sky-500"
+                  title="Lọc theo Thống kê cơ sở"
+                >
+                  <option value="ALL">-- Tất cả TKCS ({uniqueTkcsList.length}) --</option>
+                  {uniqueTkcsList.map(t => (
+                    <option key={t.code} value={t.code}>
+                      [{t.code}] {t.label.split(' - ')[1] || t.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 3. Lọc theo Xã / Phường */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-700 font-bold text-sky-950">Xã / Phường:</span>
                 <select
                   value={quickAssignCommuneId}
                   onChange={e => {
                     const cId = e.target.value;
                     setQuickAssignCommuneId(cId);
-                    const matchingArs = cId === 'ALL'
-                      ? allowedSupervisorAreas
-                      : allowedSupervisorAreas.filter(a => a.communeId === cId || (a as any).communeCode === cId);
-                    if (matchingArs.length > 0) {
-                      setAssignAreaCode(matchingArs[0].code);
-                    }
+                    setQuickAssignSelectedAreaIds([]);
                   }}
-                  className="bg-white border border-sky-400 rounded px-2.5 py-1.5 font-bold text-slate-900 shadow-2xs"
-                  title="Chọn xã để chỉ hiển thị các địa bàn thuộc xã đó, tránh nhầm lẫn"
+                  className="bg-white border border-sky-400 rounded px-2.5 py-1.5 font-bold text-slate-900 shadow-2xs focus:outline-sky-500"
+                  title="Chọn xã để chỉ hiển thị các địa bàn thuộc xã đó"
                 >
-                  <option value="ALL">-- Tất cả các xã ({allowedSupervisorCommunes.length}) --</option>
-                  {allowedSupervisorCommunes.map(c => (
+                  <option value="ALL">-- Tất cả các xã ({quickAssignFilteredCommunes.length}) --</option>
+                  {quickAssignFilteredCommunes.map(c => (
                     <option key={c.id} value={c.id}>
                       [{c.communeCode}] {c.communeName}
                     </option>
@@ -937,71 +1206,196 @@ export default function SurveyorManagement({
                 </select>
               </div>
 
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-700 font-medium">Địa bàn:</span>
-                <select
-                  value={assignAreaCode}
-                  onChange={e => setAssignAreaCode(e.target.value)}
-                  className="bg-white border border-slate-300 rounded px-2.5 py-1.5 font-bold text-slate-900"
+              {/* 4. Địa bàn xã có tích chọn theo địa bàn hoặc chọn tất cả các địa bàn */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setIsAreaDropdownOpen(!isAreaDropdownOpen)}
+                  className={`px-3 py-1.5 rounded border flex items-center gap-2 font-bold transition-all cursor-pointer shadow-2xs ${
+                    quickAssignSelectedAreaIds.length > 0 
+                      ? 'bg-sky-50 border-sky-400 text-sky-950 ring-1 ring-sky-300' 
+                      : 'bg-white border-slate-300 text-slate-700 hover:border-slate-400'
+                  }`}
+                  title="Bấm để chọn từng địa bàn hoặc tất cả các địa bàn"
                 >
-                  {allowedSupervisorAreas
-                    .filter(a => quickAssignCommuneId === 'ALL' || a.communeId === quickAssignCommuneId || (a as any).communeCode === quickAssignCommuneId)
-                    .map(a => {
-                      const commObj = allowedSupervisorCommunes.find(c => c.id === a.communeId || c.communeCode === (a as any).communeCode);
-                      return (
-                        <option key={a.id} value={a.id}>
-                          {getAreaDisplayName(a.id, a.communeId)} (ĐB {a.code}) {commObj ? `• ${commObj.communeName}` : ''}
-                        </option>
-                      );
-                    })}
-                  {allowedSupervisorAreas.filter(a => quickAssignCommuneId === 'ALL' || a.communeId === quickAssignCommuneId || (a as any).communeCode === quickAssignCommuneId).length === 0 && (
-                    <option value="">(Xã này chưa có địa bàn)</option>
-                  )}
-                </select>
+                  <MapPin className="w-3.5 h-3.5 text-sky-700 shrink-0" />
+                  <span>
+                    {quickAssignSelectedAreaIds.length === 0 
+                      ? `Chọn địa bàn (${quickAssignAvailableAreas.length})` 
+                      : quickAssignSelectedAreaIds.length === quickAssignAvailableAreas.length 
+                      ? `Tất cả (${quickAssignAvailableAreas.length} địa bàn)` 
+                      : `Đã chọn: ${quickAssignSelectedAreaIds.length} / ${quickAssignAvailableAreas.length}`}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+
+                {/* Dropdown panel with checkboxes */}
+                {isAreaDropdownOpen && (
+                  <div className="absolute left-0 sm:right-0 sm:left-auto top-full mt-1.5 w-80 md:w-96 bg-white border border-slate-300 rounded-lg shadow-xl z-50 p-3 text-xs flex flex-col gap-2.5 animate-in fade-in duration-100">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                      <label className="flex items-center gap-2 font-black text-sky-950 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={quickAssignAvailableAreas.length > 0 && quickAssignAvailableAreas.every(a => quickAssignSelectedAreaIds.includes(a.id))}
+                          onChange={handleToggleSelectAllQuickAreas}
+                          className="rounded text-sky-700 w-4 h-4 cursor-pointer"
+                        />
+                        <span>Chọn tất cả các địa bàn ({quickAssignAvailableAreas.length})</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setIsAreaDropdownOpen(false)}
+                        className="text-slate-400 hover:text-slate-600 p-1 rounded"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="max-h-60 overflow-y-auto flex flex-col gap-1 pr-1">
+                      {quickAssignAvailableAreas.map(a => {
+                        const isChecked = quickAssignSelectedAreaIds.includes(a.id);
+                        const commObj = allowedSupervisorCommunes.find(c => c.id === a.communeId || c.communeCode === (a as any).communeCode);
+                        return (
+                          <label
+                            key={a.id}
+                            className={`flex items-start gap-2 p-1.5 rounded cursor-pointer transition-colors border ${
+                              isChecked ? 'bg-sky-50 border-sky-300 font-bold text-sky-950' : 'border-slate-100 hover:bg-slate-50'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => handleToggleQuickArea(a.id)}
+                              className="rounded text-sky-700 mt-0.5 cursor-pointer"
+                            />
+                            <div className="flex flex-col min-w-0">
+                              <span className="font-bold text-slate-900 truncate">
+                                {getAreaDisplayName(a.id, a.communeId)}
+                              </span>
+                              <span className="text-[10px] text-slate-500 font-normal">
+                                ĐB {a.code} {commObj ? `• ${commObj.communeName}` : ''}
+                              </span>
+                            </div>
+                          </label>
+                        );
+                      })}
+                      {quickAssignAvailableAreas.length === 0 && (
+                        <div className="text-center py-4 text-slate-400 italic">
+                          Không có địa bàn nào theo bộ lọc xã/TKCS đã chọn.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-200 text-[11px]">
+                      <span className="text-slate-600 font-medium">
+                        Đã chọn: <strong className="text-sky-900">{quickAssignSelectedAreaIds.length}</strong> địa bàn
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setQuickAssignSelectedAreaIds([])}
+                          className="text-rose-600 hover:underline font-bold"
+                        >
+                          Bỏ chọn
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsAreaDropdownOpen(false)}
+                          className="px-2.5 py-1 bg-sky-800 text-white rounded font-bold hover:bg-sky-700"
+                        >
+                          Xong
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
+              {/* 5. Nút Áp dụng phân */}
               <button
                 type="button"
                 onClick={handleExecuteBatchAssign}
-                disabled={isAssigning || areas.length === 0 || filteredSurveyors.length === 0 || !assignAreaCode}
-                className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-400 text-white rounded font-bold cursor-pointer transition-colors shadow-2xs flex items-center gap-1"
+                disabled={isAssigning || !assignSurveyorId || quickAssignAvailableAreas.length === 0}
+                className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:bg-slate-300 disabled:text-slate-500 text-white rounded font-bold cursor-pointer transition-colors shadow-2xs flex items-center gap-1.5 shrink-0"
+                title="Gán toàn bộ các hộ trong các địa bàn đã chọn (hoặc toàn bộ địa bàn theo bộ lọc) cho Cán bộ / ĐTV này"
               >
                 {isAssigning ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-                <span>Áp dụng phân công</span>
+                <span>Áp dụng phân</span>
               </button>
+
+              {/* Nút Xuất mẫu Excel */}
+              <button
+                type="button"
+                onClick={handleExportTemplate}
+                className="px-3 py-1.5 bg-white border border-emerald-600 text-emerald-800 hover:bg-emerald-50 rounded font-bold cursor-pointer transition-colors shadow-2xs flex items-center gap-1.5 shrink-0"
+                title="Tải file mẫu Excel để phân công và phân quyền hàng loạt"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Xuất mẫu Excel</span>
+              </button>
+
+              {/* Nút Tải lên Excel phân quyền */}
+              <label
+                className="px-3 py-1.5 bg-emerald-800 hover:bg-emerald-700 text-white rounded font-bold cursor-pointer transition-colors shadow-2xs flex items-center gap-1.5 shrink-0"
+                title="Chọn file Excel phân quyền đã điền để tải lên hệ thống"
+              >
+                <Upload className="w-3.5 h-3.5 text-white" />
+                <span>Tải lên Excel</span>
+                <input
+                  type="file"
+                  accept=".xlsx, .xls, .csv"
+                  onChange={handleImportExcelFile}
+                  className="hidden"
+                />
+              </label>
             </div>
           </div>
 
-          {/* Main Surveyor Table Card */}
+          {/* Main Table Card */}
           <div className="bg-white rounded-lg border border-slate-300 shadow-xs flex flex-col">
-            {/* Table Filters Header */}
+            {/* Table Filters & View Mode Header */}
             <div className="p-3 border-b border-slate-200 flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
               <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-                <div className="relative w-full md:w-56">
+                <div className="relative w-full md:w-52">
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
                   <input
                     type="text"
-                    placeholder="Tìm theo tên, mã ĐTV, SĐT..."
+                    placeholder="Tìm theo tên, mã ĐTV, địa bàn..."
                     value={searchTerm}
                     onChange={e => setSearchTerm(e.target.value)}
                     className="w-full pl-8 pr-3 py-1.5 border border-slate-300 rounded focus:border-sky-500 focus:outline-hidden"
                   />
                 </div>
 
+                {/* Lọc TKCS trên lưới */}
                 <select
-                  value={surveyorCommuneFilter}
-                  onChange={e => setSurveyorCommuneFilter(e.target.value)}
+                  value={gridTkcsFilter}
+                  onChange={e => setGridTkcsFilter(e.target.value)}
                   className="border border-slate-300 rounded px-2.5 py-1.5 font-medium bg-white"
-                  title="Lọc danh sách cán bộ theo Xã phụ trách"
+                  title="Lọc bảng theo TKCS"
                 >
-                  <option value="ALL">Tất cả Xã / Phường ({allowedSupervisorCommunes.length})</option>
-                  {allowedSupervisorCommunes.map(c => (
-                    <option key={c.id} value={c.id}>[{c.communeCode}] {c.communeName}</option>
+                  <option value="ALL">Tất cả TKCS ({uniqueTkcsList.length})</option>
+                  {uniqueTkcsList.map(t => (
+                    <option key={t.code} value={t.code}>[{t.code}] {t.label.split(' - ')[1] || t.label}</option>
                   ))}
                 </select>
 
+                {/* Lọc Xã trên lưới */}
+                <select
+                  value={gridCommuneFilter}
+                  onChange={e => setGridCommuneFilter(e.target.value)}
+                  className="border border-slate-300 rounded px-2.5 py-1.5 font-medium bg-white"
+                  title="Lọc bảng theo Xã"
+                >
+                  <option value="ALL">Tất cả Xã / Phường ({allowedSupervisorCommunes.length})</option>
+                  {allowedSupervisorCommunes.map(c => (
+                    <option key={c.communeCode} value={c.communeCode}>[{c.communeCode}] {c.communeName}</option>
+                  ))}
+                </select>
+
+                {/* Lọc Phòng ban */}
                 {currentUser.role === 'SUPERVISOR' ? (
-                  <div className="px-2.5 py-1.5 bg-sky-50 text-sky-900 border border-sky-300 rounded font-bold text-xs flex items-center gap-1.5 shadow-2xs">
+                  <div className="px-2.5 py-1.5 bg-sky-50 text-sky-900 border border-sky-300 rounded font-bold text-xs flex items-center gap-1.5">
                     <Building2 className="w-3.5 h-3.5 text-sky-700 shrink-0" />
                     <span>Phòng: <strong>{currentUser.department}</strong></span>
                   </div>
@@ -1018,227 +1412,506 @@ export default function SurveyorManagement({
                   </select>
                 )}
 
+                {/* Lọc Vai trò */}
                 <select
                   value={roleFilter}
                   onChange={e => setRoleFilter(e.target.value)}
                   className="border border-slate-300 rounded px-2.5 py-1.5 font-medium bg-white"
                 >
                   <option value="ALL">Tất cả vai trò</option>
-                  <option value="ADMIN">Quản trị viên / Giám sát xã</option>
                   <option value="SURVEYOR">Điều tra viên</option>
                   <option value="SUPERVISOR">Giám sát viên</option>
+                  <option value="ADMIN">Quản trị viên</option>
                 </select>
               </div>
 
-              <div className="flex items-center gap-2 text-slate-500 text-xs">
-                <span>Hiển thị <strong>{filteredSurveyors.length}</strong> / {surveyors.length} tài khoản</span>
+              {/* View mode toggle & row count */}
+              <div className="flex items-center gap-3">
+                <div className="inline-flex rounded border border-slate-300 bg-slate-100 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('grid_areas')}
+                    className={`px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      viewMode === 'grid_areas' 
+                        ? 'bg-sky-800 text-white shadow-2xs' 
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Mỗi địa bàn phân công là 1 dòng độc lập"
+                  >
+                    <Table className="w-3.5 h-3.5" />
+                    <span>Lưới theo địa bàn</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('summary_accounts')}
+                    className={`px-2.5 py-1 rounded text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                      viewMode === 'summary_accounts' 
+                        ? 'bg-sky-800 text-white shadow-2xs' 
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                    title="Mỗi tài khoản cán bộ là 1 dòng"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>Theo tài khoản</span>
+                  </button>
+                </div>
+
+                <span className="text-slate-500 text-xs hidden sm:inline">
+                  {viewMode === 'grid_areas' ? (
+                    <>Hiển thị <strong>{filteredGridRows.length}</strong> dòng địa bàn</>
+                  ) : (
+                    <>Hiển thị <strong>{filteredSurveyors.length}</strong> tài khoản</>
+                  )}
+                </span>
               </div>
             </div>
 
-            {/* Surveyor Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-xs">
-                <thead>
-                  <tr className="bg-[#058da0] text-white text-center font-bold">
-                    <th className="border border-[#047484] p-2.5 w-12">STT</th>
-                    <th className="border border-[#047484] p-2.5 w-24">Tên đăng nhập / Mã</th>
-                    <th className="border border-[#047484] p-2.5 text-left min-w-[160px]">Họ và tên cán bộ</th>
-                    <th className="border border-[#047484] p-2.5 text-left w-44">Phòng ban phụ trách</th>
-                    <th className="border border-[#047484] p-2.5 text-left w-36">Vai trò hệ thống</th>
-                    <th className="border border-[#047484] p-2.5 text-left min-w-[200px]">Địa bàn được phân công</th>
-                    <th className="border border-[#047484] p-2.5 text-center w-36">Tiến độ nhập hộ</th>
-                    <th className="border border-[#047484] p-2.5 text-center w-36">Bảo mật / Đổi MK</th>
-                    <th className="border border-[#047484] p-2.5 text-center w-40">Thao tác Admin</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredSurveyors.map((s, idx) => {
-                    const roleConfig = ROLE_LABELS[s.role] || ROLE_LABELS.SURVEYOR;
-                    const matchedDept = departments.find(d => d.id === s.departmentId || d.name === s.department);
-                    
-                    const assignedHh = households.filter(h => h.assignedSurveyorId === s.id);
-                    const completedHh = assignedHh.filter(h => h.surveyStatus === 'DA_HOAN_THANH' || h.surveyStatus === 'DA_DUYET').length;
-                    const isCurrentActive = currentUser?.id === s.id;
+            {/* VIEW MODE 1: LƯỚI PHÂN CÔNG CHI TIẾT (MỖI ĐỊA BÀN LÀ 1 DÒNG) */}
+            {viewMode === 'grid_areas' ? (
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-[#058da0] text-white text-center font-bold">
+                      <th className="border border-[#047484] p-2.5 w-12 text-center">STT</th>
+                      <th className="border border-[#047484] p-2.5 text-left min-w-[140px]">Tên TKCS</th>
+                      <th className="border border-[#047484] p-2.5 text-left min-w-[130px]">Tên xã</th>
+                      <th className="border border-[#047484] p-2.5 text-center w-20">Mã xã</th>
+                      <th className="border border-[#047484] p-2.5 text-center w-28">Tên đăng nhập</th>
+                      <th className="border border-[#047484] p-2.5 text-left min-w-[150px]">Họ và tên</th>
+                      <th className="border border-[#047484] p-2.5 text-left min-w-[150px]">Phòng ban phụ trách</th>
+                      <th className="border border-[#047484] p-2.5 text-center w-32">Vai trò hệ thống</th>
+                      <th className="border border-[#047484] p-2.5 text-left min-w-[200px]">Địa bàn phân công</th>
+                      <th className="border border-[#047484] p-2.5 text-center w-28">Tiến độ hộ</th>
+                      <th className="border border-[#047484] p-2.5 text-center w-28">Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredGridRows.map((row, idx) => {
+                      const isCurrentActive = currentUser?.id === row.surveyor.id;
+                      const roleColorClass = 
+                        row.role === 'ADMIN' ? 'text-rose-700 font-bold' :
+                        row.role === 'SUPERVISOR' ? 'text-amber-700 font-bold' :
+                        'text-sky-700 font-medium';
 
-                    return (
-                      <tr key={s.id} className={`hover:bg-sky-50/80 transition-colors ${isCurrentActive ? 'bg-sky-50 font-medium' : 'odd:bg-slate-50/40'}`}>
-                        <td className="border border-slate-300 p-2.5 text-center text-slate-600 font-bold">{idx + 1}</td>
-                        
-                        <td className="border border-slate-300 p-2.5 text-center font-black text-sky-900 bg-sky-50/50 font-mono">
-                          {s.code}
-                        </td>
+                      return (
+                        <tr
+                          key={row.rowKey}
+                          className={`hover:bg-sky-50/70 transition-colors border-b border-slate-200 ${
+                            isCurrentActive ? 'bg-sky-50/60 font-medium' : 'odd:bg-white even:bg-slate-50/40'
+                          }`}
+                        >
+                          {/* 1. STT */}
+                          <td className="border-r border-slate-200 p-2.5 text-center text-slate-500 font-semibold">{idx + 1}</td>
 
-                        <td className="border border-slate-300 p-2.5 text-slate-900">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-extrabold text-sm">{s.name}</span>
-                            {isCurrentActive && (
-                              <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-sky-700 text-white shadow-2xs">
-                                Đang đăng nhập
+                          {/* 2. Tên TKCS */}
+                          <td className="border-r border-slate-200 p-2.5 text-slate-700 text-left">
+                            {row.tkcsName}
+                          </td>
+
+                          {/* 3. Tên xã */}
+                          <td className="border-r border-slate-200 p-2.5 text-slate-900 font-medium text-left">
+                            {row.communeName}
+                          </td>
+
+                          {/* 4. Mã xã */}
+                          <td className="border-r border-slate-200 p-2.5 text-center font-mono text-slate-600">
+                            {row.communeCode}
+                          </td>
+
+                          {/* 5. Tên đăng nhập */}
+                          <td className="border-r border-slate-200 p-2.5 text-center font-mono font-bold text-sky-950">
+                            {row.username}
+                          </td>
+
+                          {/* 6. Họ và tên */}
+                          <td className="border-r border-slate-200 p-2.5 text-slate-900 font-bold text-left">
+                            <div className="flex items-center gap-1.5">
+                              <span>{row.fullName}</span>
+                              {isCurrentActive && (
+                                <span className="text-[10px] text-sky-700 font-black">
+                                  (Đang đăng nhập)
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* 7. Phòng ban phụ trách */}
+                          <td className="border-r border-slate-200 p-2.5 text-slate-700 text-left">
+                            {row.departmentName}
+                          </td>
+
+                          {/* 8. Vai trò hệ thống */}
+                          <td className={`border-r border-slate-200 p-2.5 text-center ${roleColorClass}`}>
+                            {row.roleLabel}
+                          </td>
+
+                          {/* 9. Địa bàn phân công - Mỗi địa bàn 1 dòng rõ ràng */}
+                          <td className="border-r border-slate-200 p-2.5 text-left">
+                            {row.isAssignedArea ? (
+                              <span className="font-bold text-slate-900">
+                                {row.areaDisplayName}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 italic">
+                                Chưa phân công địa bàn
                               </span>
                             )}
-                          </div>
-                          {s.position && (
-                            <span className="text-[10px] text-slate-500 font-medium block">
-                              {s.position}
-                            </span>
-                          )}
-                          {s.phone && (
-                            <span className="text-[10px] text-slate-500 block">
-                              SĐT: {s.phone}
-                            </span>
-                          )}
-                        </td>
+                          </td>
 
-                        <td className="border border-slate-300 p-2.5">
-                          {matchedDept ? (
-                            <span className="px-2 py-0.5 rounded font-bold text-[11px] bg-slate-100 text-slate-800 border border-slate-300 inline-block">
-                              {matchedDept.code} - {matchedDept.name}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400 italic">Chưa chọn</span>
-                          )}
-                        </td>
+                          {/* 10. Tiến độ hộ */}
+                          <td className="border-r border-slate-200 p-2.5 text-center text-slate-700">
+                            {row.totalHh > 0 ? (
+                              <span className={row.completedHh === row.totalHh ? 'text-emerald-700 font-bold' : 'font-medium'}>
+                                {row.completedHh}/{row.totalHh} hộ
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            )}
+                          </td>
 
-                        <td className="border border-slate-300 p-2.5">
-                          <span className={`px-2 py-0.5 rounded font-bold text-[11px] border inline-block ${roleConfig.color}`}>
+                          {/* 11. Thao tác */}
+                          <td className="p-2.5 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              {row.isAssignedArea && row.areaId && onUnassignArea && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    if (confirm(`Hủy phân công địa bàn "${row.areaDisplayName}" khỏi cán bộ ${row.fullName}?`)) {
+                                      await onUnassignArea(row.surveyor.id, row.areaId!);
+                                      showNotification('success', `Đã hủy phân công địa bàn cho ${row.fullName}`);
+                                    }
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
+                                  title="Hủy phân công địa bàn này"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => openEditModal(row.surveyor)}
+                                className="p-1.5 text-slate-400 hover:text-sky-700 hover:bg-sky-50 rounded transition-colors"
+                                title="Chỉnh sửa tài khoản & Phân quyền"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSurveyorToResetPassword(row.surveyor);
+                                  setNewResetPassword('123456');
+                                  setResetMustChange(true);
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-amber-700 hover:bg-amber-50 rounded transition-colors"
+                                title="Đổi mật khẩu tài khoản"
+                              >
+                                <KeyRound className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {filteredGridRows.length === 0 && (
+                      <tr>
+                        <td colSpan={11} className="p-8 text-center text-slate-400 italic">
+                          Không tìm thấy dòng phân công nào phù hợp với bộ lọc hiện tại.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              /* VIEW MODE 2: DANH SÁCH TÀI KHOẢN TỔNG HỢP */
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-[#058da0] text-white text-center font-bold">
+                      <th className="border border-[#047484] p-2.5 w-12">STT</th>
+                      <th className="border border-[#047484] p-2.5 w-24">Tên đăng nhập</th>
+                      <th className="border border-[#047484] p-2.5 text-left min-w-[160px]">Họ và tên cán bộ</th>
+                      <th className="border border-[#047484] p-2.5 text-left w-44">Phòng ban</th>
+                      <th className="border border-[#047484] p-2.5 text-center w-36">Vai trò hệ thống</th>
+                      <th className="border border-[#047484] p-2.5 text-left min-w-[200px]">Địa bàn / Xã phụ trách</th>
+                      <th className="border border-[#047484] p-2.5 text-center w-36">Tiến độ nhập</th>
+                      <th className="border border-[#047484] p-2.5 text-center w-32">Bảo mật</th>
+                      <th className="border border-[#047484] p-2.5 text-center w-36">Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredSurveyors.map((s, idx) => {
+                      const roleConfig = ROLE_LABELS[s.role] || ROLE_LABELS.SURVEYOR;
+                      const matchedDept = departments.find(d => d.id === s.departmentId || d.name === s.department);
+                      const assignedHh = households.filter(h => h.assignedSurveyorId === s.id);
+                      const completedHh = assignedHh.filter(h => h.surveyStatus === 'DA_HOAN_THANH' || h.surveyStatus === 'DA_DUYET').length;
+                      const isCurrentActive = currentUser?.id === s.id;
+
+                      return (
+                        <tr key={s.id} className={`hover:bg-sky-50/80 transition-colors ${isCurrentActive ? 'bg-sky-50 font-medium' : 'odd:bg-slate-50/40'}`}>
+                          <td className="border border-slate-300 p-2.5 text-center text-slate-600 font-bold">{idx + 1}</td>
+                          <td className="border border-slate-300 p-2.5 text-center font-black text-sky-900 bg-sky-50/50 font-mono">
+                            {s.code}
+                          </td>
+                          <td className="border border-slate-300 p-2.5 text-slate-900 font-bold">
+                            <div className="flex items-center gap-1.5">
+                              <span>{s.name}</span>
+                              {isCurrentActive && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-sky-700 text-white">
+                                  Đang đăng nhập
+                                </span>
+                              )}
+                            </div>
+                            {s.phone && <span className="text-[10px] text-slate-500 block font-normal">SĐT: {s.phone}</span>}
+                          </td>
+                          <td className="border border-slate-300 p-2.5 text-slate-700">
+                            {matchedDept ? `${matchedDept.code} - ${matchedDept.name}` : 'Chưa chọn'}
+                          </td>
+                          <td className="border border-slate-300 p-2.5 text-center">
+                            <span className={s.role === 'ADMIN' ? 'text-rose-700 font-bold' : s.role === 'SUPERVISOR' ? 'text-amber-700 font-bold' : 'text-sky-700 font-medium'}>
+                              {roleConfig.label}
+                            </span>
+                          </td>
+                          <td className="border border-slate-300 p-2.5">
+                            {s.role === 'SUPERVISOR' ? (
+                              <span>Giám sát: {s.assignedCommunes?.includes('ALL') || !s.assignedCommunes ? `Tất cả các xã (${communes.length})` : `${s.assignedCommunes.length} xã`}</span>
+                            ) : s.role === 'ADMIN' ? (
+                              <span className="text-purple-700 font-bold">Toàn quyền hệ thống</span>
+                            ) : s.assignedAreas.includes('ALL') ? (
+                              <span className="text-sky-800 font-bold">Toàn bộ địa bàn trong xã</span>
+                            ) : s.assignedAreas.length > 0 ? (
+                              <span>Được phân công: <strong className="text-sky-900">{s.assignedAreas.filter(a => a !== '001').length}</strong> địa bàn</span>
+                            ) : (
+                              <span className="text-slate-400 italic">Chưa phân công địa bàn</span>
+                            )}
+                          </td>
+                          <td className="border border-slate-300 p-2.5 text-center">
+                            <span className="font-bold text-slate-800">{completedHh} / {assignedHh.length} hộ</span>
+                          </td>
+                          <td className="border border-slate-300 p-2.5 text-center">
+                            {s.mustChangePassword ? (
+                              <span className="text-amber-700 font-semibold">Cần đổi MK</span>
+                            ) : (
+                              <span className="text-emerald-700 font-semibold">Đã bảo mật</span>
+                            )}
+                          </td>
+                          <td className="border border-slate-300 p-2.5 text-center">
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSurveyorToResetPassword(s);
+                                  setNewResetPassword('123456');
+                                  setResetMustChange(true);
+                                }}
+                                className="px-2 py-1 text-amber-800 bg-amber-50 hover:bg-amber-100 rounded border border-amber-300 font-bold text-[11px] flex items-center gap-1"
+                                title="Reset mật khẩu"
+                              >
+                                <KeyRound className="w-3 h-3" />
+                                <span>Reset MK</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openEditModal(s)}
+                                className="p-1.5 text-sky-700 hover:text-sky-900 bg-sky-50 rounded border border-sky-200"
+                                title="Sửa thông tin"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              {currentUser.role === 'ADMIN' && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSurveyorToDelete(s)}
+                                  className="p-1.5 text-rose-600 hover:text-rose-800 bg-rose-50 rounded border border-rose-200"
+                                  title="Xóa tài khoản"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* VIEW 3: BẢNG PHÂN QUYỀN & VAI TRÒ HỆ THỐNG */}
+      {subTab === 'permissions' && (
+        <div className="flex flex-col gap-4">
+          {/* Header Banner */}
+          <div className="bg-linear-to-r from-purple-50 to-indigo-50 border border-purple-200 rounded-lg p-4 shadow-xs flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 bg-purple-700 text-white rounded-lg shrink-0">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-black text-purple-950 text-sm">
+                  Ma Trận Phân Quyền & Vai Trò Hệ Thống (RBAC)
+                </h3>
+                <p className="text-slate-600 mt-1 leading-relaxed">
+                  Thiết lập vai trò, phân định ranh giới phụ trách và kiểm soát quyền truy cập dữ liệu giữa Quản trị viên, Giám sát viên và Điều tra viên theo đúng chuẩn quy trình thống kê.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => openAddModal()}
+                className="px-3.5 py-2 bg-purple-800 hover:bg-purple-700 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition-colors"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>+ Cấp Tài Khoản Mới</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Ma trận phân quyền */}
+          <div className="bg-white rounded-lg border border-slate-300 shadow-xs overflow-hidden">
+            <div className="bg-slate-100 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+              <h4 className="font-extrabold text-slate-800 text-xs uppercase tracking-wide flex items-center gap-2">
+                <Shield className="w-4 h-4 text-purple-700" />
+                <span>1. Ma trận quyền hạn chi tiết theo 3 vai trò</span>
+              </h4>
+              <span className="text-[11px] text-slate-500 font-medium">Bảo mật cấp độ tài khoản & địa bàn</span>
+            </div>
+
+            <div className="overflow-x-auto text-xs">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 text-slate-800 border-b border-slate-300 font-bold">
+                    <th className="p-3 text-left w-64 border-r border-slate-200">Chức năng & Tác vụ</th>
+                    <th className="p-3 text-center border-r border-slate-200 bg-rose-50/50 text-rose-900 w-64">
+                      <div className="font-black text-xs">QUẢN TRỊ VIÊN (ADMIN)</div>
+                      <div className="text-[10px] text-rose-700 font-normal">Toàn quyền cấp huyện</div>
+                    </th>
+                    <th className="p-3 text-center border-r border-slate-200 bg-amber-50/50 text-amber-900 w-64">
+                      <div className="font-black text-xs">GIÁM SÁT VIÊN (SUPERVISOR)</div>
+                      <div className="text-[10px] text-amber-700 font-normal">Quản lý theo phòng & xã phụ trách</div>
+                    </th>
+                    <th className="p-3 text-center bg-sky-50/50 text-sky-900 w-64">
+                      <div className="font-black text-xs">ĐIỀU TRA VIÊN (SURVEYOR)</div>
+                      <div className="text-[10px] text-sky-700 font-normal">Chỉ trong phạm vi địa bàn được giao</div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  <tr>
+                    <td className="p-2.5 font-bold text-slate-800 border-r border-slate-200">Phạm vi xem dữ liệu hộ & xã</td>
+                    <td className="p-2.5 text-center border-r border-slate-200 text-slate-700 font-medium">Toàn bộ 100% các xã, địa bàn và hộ</td>
+                    <td className="p-2.5 text-center border-r border-slate-200 text-slate-700 font-medium">Chỉ xem các xã được phân công phụ trách</td>
+                    <td className="p-2.5 text-center text-slate-700 font-medium">Chỉ xem hộ thuộc đúng các địa bàn được giao</td>
+                  </tr>
+                  <tr className="bg-slate-50/40">
+                    <td className="p-2.5 font-bold text-slate-800 border-r border-slate-200">Thu thập & Nhập tin phiếu điều tra</td>
+                    <td className="p-2.5 text-center border-r border-slate-200 text-emerald-700 font-bold">✓ Toàn quyền nhập & sửa mọi phiếu</td>
+                    <td className="p-2.5 text-center border-r border-slate-200 text-emerald-700 font-bold">✓ Nhập & phúc tra trong các xã phụ trách</td>
+                    <td className="p-2.5 text-center text-emerald-700 font-bold">✓ Nhập phiếu cho các địa bàn của mình</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2.5 font-bold text-slate-800 border-r border-slate-200">Kiểm tra, phúc tra & Duyệt số liệu</td>
+                    <td className="p-2.5 text-center border-r border-slate-200 text-emerald-700 font-bold">✓ Duyệt & Chốt số liệu toàn huyện</td>
+                    <td className="p-2.5 text-center border-r border-slate-200 text-emerald-700 font-bold">✓ Kiểm tra & Duyệt phiếu ĐTV thuộc phòng</td>
+                    <td className="p-2.5 text-center text-rose-600 font-medium">✕ Không có quyền duyệt</td>
+                  </tr>
+                  <tr className="bg-slate-50/40">
+                    <td className="p-2.5 font-bold text-slate-800 border-r border-slate-200">Phân công địa bàn cho ĐTV</td>
+                    <td className="p-2.5 text-center border-r border-slate-200 text-emerald-700 font-bold">✓ Toàn quyền phân công tất cả các xã</td>
+                    <td className="p-2.5 text-center border-r border-slate-200 text-emerald-700 font-bold">✓ Phân công cho ĐTV thuộc phòng phụ trách</td>
+                    <td className="p-2.5 text-center text-rose-600 font-medium">✕ Không có quyền phân công</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2.5 font-bold text-slate-800 border-r border-slate-200">Cấp tài khoản & Reset mật khẩu</td>
+                    <td className="p-2.5 text-center border-r border-slate-200 text-emerald-700 font-bold">✓ Cấp mới, đổi quyền & reset mọi tài khoản</td>
+                    <td className="p-2.5 text-center border-r border-slate-200 text-emerald-700 font-bold">✓ Cấp tài khoản ĐTV thuộc phòng mình</td>
+                    <td className="p-2.5 text-center text-slate-700 font-medium">Chỉ tự đổi mật khẩu cá nhân</td>
+                  </tr>
+                  <tr className="bg-slate-50/40">
+                    <td className="p-2.5 font-bold text-slate-800 border-r border-slate-200">Nhập bảng kê Excel / Sao lưu Cloud</td>
+                    <td className="p-2.5 text-center border-r border-slate-200 text-emerald-700 font-bold">✓ Toàn quyền import, export & đồng bộ</td>
+                    <td className="p-2.5 text-center border-r border-slate-200 text-rose-600 font-medium">✕ Không có quyền nạp bảng kê</td>
+                    <td className="p-2.5 text-center text-rose-600 font-medium">✕ Không có quyền nạp bảng kê</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Bảng danh sách phân quyền cán bộ */}
+          <div className="bg-white rounded-lg border border-slate-300 shadow-xs overflow-hidden flex flex-col">
+            <div className="bg-slate-100 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+              <h4 className="font-extrabold text-slate-800 text-xs uppercase tracking-wide flex items-center gap-2">
+                <Users className="w-4 h-4 text-sky-700" />
+                <span>2. Danh sách cấu hình phân quyền hiện tại ({surveyors.length} tài khoản)</span>
+              </h4>
+              <span className="text-[11px] text-slate-500 font-medium">Bấm vào biểu tượng sửa để thay đổi vai trò hoặc phạm vi địa bàn</span>
+            </div>
+
+            <div className="overflow-x-auto text-xs">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-[#058da0] text-white text-center font-bold">
+                    <th className="border border-[#047484] p-2.5 w-12 text-center">STT</th>
+                    <th className="border border-[#047484] p-2.5 text-center w-24">Mã cán bộ</th>
+                    <th className="border border-[#047484] p-2.5 text-left min-w-[160px]">Họ và tên</th>
+                    <th className="border border-[#047484] p-2.5 text-left w-48">Phòng ban</th>
+                    <th className="border border-[#047484] p-2.5 text-center w-36">Vai trò hệ thống</th>
+                    <th className="border border-[#047484] p-2.5 text-left min-w-[240px]">Phạm vi phân quyền</th>
+                    <th className="border border-[#047484] p-2.5 text-center w-32">Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {surveyors.map((s, idx) => {
+                    const roleConfig = ROLE_LABELS[s.role] || ROLE_LABELS.SURVEYOR;
+                    const matchedDept = departments.find(d => d.id === s.departmentId || d.name === s.department);
+                    return (
+                      <tr key={s.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="p-2.5 text-center font-semibold text-slate-500 border-r border-slate-200">{idx + 1}</td>
+                        <td className="p-2.5 text-center font-mono font-bold text-sky-950 border-r border-slate-200">{s.code}</td>
+                        <td className="p-2.5 text-left font-bold text-slate-900 border-r border-slate-200">
+                          {s.name}
+                          {s.position && <span className="text-[10px] text-slate-500 block font-normal">{s.position}</span>}
+                        </td>
+                        <td className="p-2.5 text-left text-slate-700 border-r border-slate-200">
+                          {matchedDept ? `${matchedDept.code} - ${matchedDept.name}` : (s.department || '---')}
+                        </td>
+                        <td className="p-2.5 text-center border-r border-slate-200">
+                          <span className={s.role === 'ADMIN' ? 'text-rose-700 font-bold' : s.role === 'SUPERVISOR' ? 'text-amber-700 font-bold' : 'text-sky-700 font-medium'}>
                             {roleConfig.label}
                           </span>
                         </td>
-
-                        <td className="border border-slate-300 p-2.5">
-                          {s.role === 'SUPERVISOR' ? (
-                            <div className="flex flex-col gap-1">
-                              <span className="text-[11px] font-bold text-amber-900 block mb-0.5">Giám sát các xã:</span>
-                              {s.assignedCommunes?.includes('ALL') || !s.assignedCommunes || s.assignedCommunes.length === 0 ? (
-                                <span className="px-2 py-0.5 rounded font-black text-[10px] bg-amber-100 text-amber-900 border border-amber-300 inline-block">
-                                  Toàn bộ xã ({communes.length} xã)
-                                </span>
-                              ) : (
-                                <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
-                                  {s.assignedCommunes.map(commId => {
-                                    const commObj = communes.find(c => c.id === commId || c.communeCode === commId);
-                                    return (
-                                      <span
-                                        key={commId}
-                                        className="px-1.5 py-0.5 rounded font-bold text-[10px] bg-amber-50 text-amber-950 border border-amber-300 inline-flex items-center gap-1"
-                                      >
-                                        <Building2 className="w-2.5 h-2.5 text-amber-700" />
-                                        <span>{commObj ? commObj.communeName : commId}</span>
-                                      </span>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          ) : s.role === 'ADMIN' ? (
-                            <span className="px-2 py-0.5 rounded font-black text-[11px] bg-purple-100 text-purple-900 border border-purple-300 inline-block animate-pulse">
-                              Toàn quyền hệ thống
-                            </span>
+                        <td className="p-2.5 text-left border-r border-slate-200">
+                          {s.role === 'ADMIN' ? (
+                            <span className="text-purple-700 font-semibold">Toàn bộ tất cả các xã và địa bàn</span>
+                          ) : s.role === 'SUPERVISOR' ? (
+                            <span>Giám sát: {s.assignedCommunes?.includes('ALL') || !s.assignedCommunes || s.assignedCommunes.length === 0 ? `Toàn bộ ${communes.length} xã` : `${s.assignedCommunes.length} xã phụ trách`}</span>
                           ) : s.assignedAreas.includes('ALL') ? (
-                            <span className="px-2 py-0.5 rounded font-black text-[11px] bg-purple-100 text-purple-900 border border-purple-300 inline-block">
-                              Toàn bộ địa bàn trong xã
-                            </span>
+                            <span className="text-sky-800 font-semibold">Toàn bộ địa bàn trong xã</span>
+                          ) : s.assignedAreas.length > 0 ? (
+                            <span>Phụ trách: <strong>{s.assignedAreas.filter(a => a !== '001').length}</strong> địa bàn được phân công</span>
                           ) : (
-                            <div className="flex flex-wrap gap-1">
-                              {s.assignedAreas.filter(item => item !== '001' || areas.some(a => a.code === '001')).map(item => {
-                                const areaObj = areas.find(a => a.id === item || a.code === item || `${a.communeId}_${a.code}` === item);
-                                const commObj = areaObj ? communes.find(c => c.id === areaObj.communeId || c.communeCode === (areaObj as any).communeCode) : null;
-                                const displayName = getAreaDisplayName(item, areaObj?.communeId);
-                                return (
-                                  <span
-                                    key={item}
-                                    className="px-2 py-0.5 rounded font-bold text-[11px] bg-sky-100 text-sky-900 border border-sky-300 inline-flex items-center gap-1 shadow-2xs"
-                                    title={`Mã địa bàn: ${areaObj ? areaObj.code : item}`}
-                                  >
-                                    <MapPin className="w-3 h-3 text-sky-700 shrink-0" />
-                                    <span>{displayName}</span>
-                                    <span className="text-[10px] text-sky-700 font-normal">
-                                      (ĐB {areaObj ? areaObj.code : item}{commObj ? ` - ${commObj.communeName}` : ''})
-                                    </span>
-                                  </span>
-                                );
-                              })}
-                              {s.assignedAreas.length === 0 && (
-                                <span className="text-slate-400 italic text-[11px]">Chưa phân công địa bàn</span>
-                              )}
-                            </div>
+                            <span className="text-slate-400 italic">Chưa phân công địa bàn</span>
                           )}
                         </td>
-
-                        <td className="border border-slate-300 p-2.5 text-center">
-                          <div className="font-bold text-slate-800">
-                            <span className="text-emerald-700 font-extrabold">{completedHh}</span> / <span>{assignedHh.length} hộ</span>
-                          </div>
-                          <div className="w-full bg-slate-200 rounded-full h-1.5 mt-1 overflow-hidden">
-                            <div 
-                              className="bg-emerald-600 h-1.5 rounded-full transition-all"
-                              style={{ width: `${assignedHh.length > 0 ? (completedHh / assignedHh.length) * 100 : 0}%` }}
-                            />
-                          </div>
-                        </td>
-
-                        <td className="border border-slate-300 p-2.5 text-center">
-                          {s.mustChangePassword ? (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 inline-flex items-center gap-1">
-                              <ShieldAlert className="w-3 h-3 text-amber-700" />
-                              <span>Yêu cầu đổi MK</span>
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-300 inline-flex items-center gap-1">
-                              <ShieldCheck className="w-3 h-3 text-emerald-700" />
-                              <span>Đã bảo mật</span>
-                            </span>
-                          )}
-                        </td>
-
-                        <td className="border border-slate-300 p-2.5 text-center">
-                          <div className="flex items-center justify-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSurveyorToResetPassword(s);
-                                setNewResetPassword('123456');
-                                setResetMustChange(true);
-                              }}
-                              className="px-2 py-1 text-amber-800 hover:text-amber-950 bg-amber-50 hover:bg-amber-100 rounded border border-amber-300 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
-                              title="Admin Đặt lại Mật khẩu cho tài khoản này"
-                            >
-                              <KeyRound className="w-3.5 h-3.5" />
-                              <span>Reset MK</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => openEditModal(s)}
-                              className="p-1.5 text-sky-700 hover:text-sky-900 bg-sky-50 hover:bg-sky-100 rounded border border-sky-200 cursor-pointer"
-                              title="Sửa thông tin & Phân quyền"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                            </button>
-
-                            {currentUser.role === 'ADMIN' && (
-                              <button
-                                type="button"
-                                onClick={() => setSurveyorToDelete(s)}
-                                className="p-1.5 text-rose-600 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 rounded border border-rose-200 cursor-pointer"
-                                title="Xóa tài khoản này"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
+                        <td className="p-2.5 text-center">
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(s)}
+                            className="px-2.5 py-1 bg-sky-50 hover:bg-sky-100 text-sky-800 rounded border border-sky-300 font-bold text-xs flex items-center gap-1 mx-auto transition-colors"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>Cấu hình quyền</span>
+                          </button>
                         </td>
                       </tr>
                     );
                   })}
-
-                  {filteredSurveyors.length === 0 && (
-                    <tr>
-                      <td colSpan={9} className="p-8 text-center text-slate-500 italic">
-                        Không tìm thấy tài khoản nào phù hợp. Vui lòng bấm "+ Cấp Tài Khoản Mới" để tạo mới.
-                      </td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
             </div>
