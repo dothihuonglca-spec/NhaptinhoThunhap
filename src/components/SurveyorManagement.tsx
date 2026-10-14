@@ -85,7 +85,7 @@ export default function SurveyorManagement({
   onSyncFirebase,
   isSyncing = false
 }: SurveyorManagementProps) {
-  const [subTab, setSubTab] = useState<'departments' | 'surveyors' | 'permissions'>('surveyors');
+  const [subTab, setSubTab] = useState<'departments' | 'gsv' | 'dtv' | 'permissions'>('gsv');
   const [viewMode, setViewMode] = useState<'grid_areas' | 'summary_accounts'>('grid_areas');
   const [searchTerm, setSearchTerm] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
@@ -252,9 +252,10 @@ export default function SurveyorManagement({
     setFormEmail('');
     setFormPassword('123456');
     setShowPasswordInForm(false);
-    setFormRole('SURVEYOR');
+    const targetRole = subTab === 'gsv' ? 'SUPERVISOR' : 'SURVEYOR';
+    setFormRole(targetRole);
     setFormDeptId(currentUser.role === 'SUPERVISOR' ? (currentUser.departmentId || 'pb_01') : (defaultDeptId || (departments[0]?.id || 'pb_01')));
-    setFormPosition('Cán bộ điều tra viên');
+    setFormPosition(subTab === 'gsv' ? 'Trưởng phòng' : 'Cán bộ điều tra viên');
     setFormAllAreas(false);
     setFormAssignedAreas([]);
     setModalTkcsFilter('ALL');
@@ -564,7 +565,18 @@ export default function SurveyorManagement({
   const completedHouseholds = households.filter(h => h.surveyStatus === 'DA_HOAN_THANH' || h.surveyStatus === 'DA_DUYET').length;
   const approvedHouseholds = households.filter(h => h.surveyStatus === 'DA_DUYET').length;
 
+  const isGsv = (s: Surveyor) => {
+    if (s.role === 'ADMIN') return false;
+    return s.role === 'SUPERVISOR' || (s.position || '').toLowerCase().includes('trưởng phòng') || s.name === 'Trần Thị Thanh Huyền';
+  };
+
   const filteredSurveyors = surveyors.filter(s => {
+    if (s.role !== 'ADMIN' && currentUser.role === 'ADMIN') {
+      const gsvUser = isGsv(s);
+      if (subTab === 'gsv' && !gsvUser) return false;
+      if (subTab === 'dtv' && gsvUser) return false;
+    }
+
     // Giám sát viên chỉ được thấy và quản lý cán bộ thuộc phòng ban mình phụ trách
     if (currentUser.role === 'SUPERVISOR') {
       const myDeptId = (currentUser.departmentId || '').trim().toLowerCase();
@@ -818,15 +830,27 @@ export default function SurveyorManagement({
             <div className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-1">
               <button
                 type="button"
-                onClick={() => setSubTab('surveyors')}
+                onClick={() => setSubTab('gsv')}
                 className={`px-3.5 py-1.5 rounded-md font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
-                  subTab === 'surveyors' 
+                  subTab === 'gsv' 
+                    ? 'bg-sky-800 text-white shadow-xs' 
+                    : 'text-slate-700 hover:text-slate-900'
+                }`}
+              >
+                <Shield className="w-4 h-4" />
+                <span>1. DS và phân quyền GSV</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubTab('dtv')}
+                className={`px-3.5 py-1.5 rounded-md font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                  subTab === 'dtv' 
                     ? 'bg-sky-800 text-white shadow-xs' 
                     : 'text-slate-700 hover:text-slate-900'
                 }`}
               >
                 <Users className="w-4 h-4" />
-                <span>Phân công ĐTV & Địa bàn ({surveyors.length})</span>
+                <span>2. DS và phân quyền cho ĐTV</span>
               </button>
               <button
                 type="button"
@@ -838,7 +862,7 @@ export default function SurveyorManagement({
                 }`}
               >
                 <Building2 className="w-4 h-4" />
-                <span>5 Phòng Ban ({departments.length})</span>
+                <span>5 Phòng Ban</span>
               </button>
               <button
                 type="button"
@@ -850,7 +874,7 @@ export default function SurveyorManagement({
                 }`}
               >
                 <ShieldCheck className="w-4 h-4" />
-                <span>Bảng Phân Quyền & Vai Trò</span>
+                <span>Bảng Phân Quyền</span>
               </button>
             </div>
           ) : null}
@@ -1132,7 +1156,7 @@ export default function SurveyorManagement({
       )}
 
       {/* VIEW 2: SURVEYORS & ACCOUNTS MANAGEMENT */}
-      {subTab === 'surveyors' && (
+      {(subTab === 'gsv' || subTab === 'dtv' || subTab === 'surveyors') && (
         <div className="flex flex-col gap-4">
           {/* Quick Batch Assignment Box */}
           <div className="bg-linear-to-r from-sky-50 to-indigo-50 border border-sky-200 rounded-lg p-3.5 flex flex-col md:flex-row items-center justify-between gap-3 text-xs">
