@@ -55,7 +55,7 @@ interface SurveyorManagementProps {
   onDeleteSurveyor: (id: string) => Promise<void>;
   onSaveDepartment: (department: Department) => Promise<void>;
   onDeleteDepartment: (id: string) => Promise<void>;
-  onBatchAssignArea: (surveyorId: string, areaCode: string | string[], communeIdsOrCodes?: string[]) => Promise<void>;
+  onBatchAssignArea: (surveyorId: string, areaCode: string | string[], communeIdsOrCodes?: string[], scopeAreaIds?: string[]) => Promise<void>;
   onUnassignArea?: (surveyorId: string, areaIdOrCode: string) => Promise<void>;
   onBatchImportAssignments?: (assignments: { surveyorId: string; areaIds: string[]; communeIds: string[] }[]) => Promise<void>;
   onBatchAssignDepartmentArea: (departmentId: string, areaCodes: string[]) => Promise<void>;
@@ -109,6 +109,31 @@ export default function SurveyorManagement({
   const [isAreaDropdownOpen, setIsAreaDropdownOpen] = useState(false);
   const [surveyorCommuneFilter, setSurveyorCommuneFilter] = useState<string>('ALL');
   const [isAssigning, setIsAssigning] = useState(false);
+
+  // Tự động tích chọn các địa bàn mà cán bộ này đang phụ trách khi thay đổi người được chọn
+  useEffect(() => {
+    if (!assignSurveyorId) {
+      setQuickAssignSelectedAreaIds([]);
+      return;
+    }
+    const s = surveyors.find(item => item.id === assignSurveyorId);
+    if (!s) {
+      setQuickAssignSelectedAreaIds([]);
+      return;
+    }
+    if (s.assignedAreas.includes('ALL')) {
+      setQuickAssignSelectedAreaIds(allowedSupervisorAreas.map(a => a.id));
+      return;
+    }
+    const matchedIds = allowedSupervisorAreas.filter(a => 
+      s.assignedAreas.includes(a.id) || 
+      s.assignedAreas.includes(a.code) ||
+      s.assignedAreas.includes(`${a.communeId}_${a.code}`) ||
+      ((a as any).communeCode && s.assignedAreas.includes(`${(a as any).communeCode}_${a.code}`)) ||
+      households.some(h => (h.assignedSurveyorId === s.id || h.assignedSurveyorName === s.name) && (h.areaId === a.id || h.areaCode === a.code))
+    ).map(a => a.id);
+    setQuickAssignSelectedAreaIds(matchedIds);
+  }, [assignSurveyorId, surveyors, allowedSupervisorAreas, households]);
 
   // Department quick assign state
   const [assignDeptId, setAssignDeptId] = useState<string>(departments[0]?.id || '');
@@ -487,16 +512,11 @@ export default function SurveyorManagement({
       showNotification('error', 'Vui lòng chọn Cán bộ / Điều tra viên cần phân công.');
       return;
     }
-    const areaIdsToAssign = quickAssignSelectedAreaIds.length > 0 
-      ? quickAssignSelectedAreaIds 
-      : quickAssignAvailableAreas.map(a => a.id);
-
-    if (areaIdsToAssign.length === 0) {
-      showNotification('error', 'Vui lòng chọn ít nhất một địa bàn cần phân công.');
-      return;
-    }
     const targetSurveyor = surveyors.find(s => s.id === assignSurveyorId);
     if (!targetSurveyor) return;
+
+    const areaIdsToAssign = quickAssignSelectedAreaIds;
+    const scopeAreaIds = quickAssignAvailableAreas.map(a => a.id);
 
     const assignedAreasList = allowedSupervisorAreas.filter(a => areaIdsToAssign.includes(a.id));
     const communeIdsToAssign = Array.from(new Set(assignedAreasList.map(a => a.communeId).filter(Boolean)));
@@ -506,9 +526,10 @@ export default function SurveyorManagement({
       await onBatchAssignArea(
         assignSurveyorId, 
         areaIdsToAssign, 
-        communeIdsToAssign.length > 0 ? communeIdsToAssign : quickAssignFilteredCommunes.map(c => c.id)
+        communeIdsToAssign.length > 0 ? communeIdsToAssign : quickAssignFilteredCommunes.map(c => c.id),
+        scopeAreaIds
       );
-      showNotification('success', `Đã phân công thành công ${areaIdsToAssign.length} địa bàn cho ${targetSurveyor.name}!`);
+      showNotification('success', `Đã cập nhật phân công cho ${targetSurveyor.name} thành công (${areaIdsToAssign.length} địa bàn được chọn)!`);
       setIsAreaDropdownOpen(false);
     } catch (err: any) {
       showNotification('error', 'Lỗi phân công địa bàn: ' + err.message);
