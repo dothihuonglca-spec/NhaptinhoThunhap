@@ -992,7 +992,7 @@ export default function App() {
     showNotification('success', `Đã chọn xã [${c.communeCode}] ${c.communeName}. Sẵn sàng tải file bảng kê.`);
   };
 
-  // Link trực tiếp từ Tiến độ Điều tra viên sang Nhập tin hộ (Tab 2)
+  // Link trực tiếp từ Tiến độ Nhập tin sang Nhập tin hộ (Tab 2)
   const handleNavigateToHouseholdEntryFromProgress = (surveyorNameOrId: string, areaId?: string, communeId?: string) => {
     if (communeId && communeId !== 'ALL') {
       setSelectedCommuneId(communeId);
@@ -4598,10 +4598,10 @@ export default function App() {
                               type="button"
                               onClick={() => {
                                 setActiveTab('surveyor_progress');
-                                showNotification('success', `Đã chuyển sang xem Tiến độ của ĐTV: "${effectiveSurveyorName}".`);
+                                showNotification('success', `Đã chuyển sang xem Tiến độ Nhập tin: "${effectiveSurveyorName}".`);
                               }}
                               className="p-1 text-slate-400 hover:text-teal-700 hover:bg-teal-50 rounded transition-colors cursor-pointer"
-                              title={`Xem chi tiết tiến độ hoàn thành của "${effectiveSurveyorName}" tại Tab 3: Tiến độ ĐTV`}
+                              title={`Xem chi tiết tiến độ hoàn thành của "${effectiveSurveyorName}" tại Tab 3: Tiến độ Nhập tin`}
                             >
                               <TrendingUp className="w-3.5 h-3.5" />
                             </button>
@@ -5193,7 +5193,7 @@ export default function App() {
               }`}
             >
               <UserCheck className={`w-4 h-4 ${activeTab === 'surveyor_progress' ? 'text-teal-800' : 'text-emerald-300'}`} />
-              <span className={activeTab === 'surveyor_progress' ? 'text-teal-950 font-black' : 'text-white'}>3. Tiến độ ĐTV</span>
+              <span className={activeTab === 'surveyor_progress' ? 'text-teal-950 font-black' : 'text-white'}>3. Tiến độ Nhập tin</span>
             </button>
           )}
 
@@ -5920,7 +5920,7 @@ export default function App() {
           </div>
         )}
 
-        {/* TAB 3: TIẾN ĐỘ NHẬP TIN THEO TỪNG ĐIỀU TRA VIÊN ĐÃ PHÂN CÔNG */}
+        {/* TAB 3: TIẾN ĐỘ NHẬP TIN THEO TỪNG NGƯỜI DÙNG ĐÃ PHÂN CÔNG */}
         {activeTab === 'surveyor_progress' && (
           <SurveyorProgressView
             surveyors={surveyors}
