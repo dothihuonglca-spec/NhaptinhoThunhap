@@ -186,8 +186,8 @@ export default function DataSyncPanel({ currentUser, households, areas, communes
       {/* ===== ADMIN: nhập cả thư mục kết quả ===== */}
       {isAdmin && (
         <div className={card}>
-          <h3 className="font-bold text-slate-800 text-sm uppercase flex items-center gap-2"><Upload className="w-4 h-4 text-emerald-700" />2. Nhập phiếu của các điều tra viên (cả thư mục)</h3>
-          <p className="text-xs text-slate-600">Gom file của mọi ĐTV (.json hoặc .zip) vào <b>một thư mục</b> rồi bấm “Chọn thư mục”. Hệ thống đọc hết các file trong thư mục (kể cả thư mục con), gộp theo ID địa bàn, <b>địa bàn nào chưa có dữ liệu thì ghi luôn</b>; hộ nào máy này đã có dữ liệu khác thì <b>hỏi có ghi đè không</b> (mặc định không ghi đè). Phiếu được ghi vào trình duyệt của admin; bảng kê trên Firebase không bị đụng tới.</p>
+          <h3 className="font-bold text-slate-800 text-sm uppercase flex items-center gap-2"><Upload className="w-4 h-4 text-emerald-700" />2. Nhập phiếu của các user nhập tin (cả thư mục)</h3>
+          <p className="text-xs text-slate-600">Gom file của mọi use nhập tin (.json hoặc .zip) vào <b>một thư mục</b> rồi bấm “Chọn thư mục”. Hệ thống đọc hết các file trong thư mục (kể cả thư mục con), gộp theo ID địa bàn, <b>địa bàn nào chưa có dữ liệu thì ghi luôn</b>; hộ nào máy này đã có dữ liệu khác thì <b>hỏi có ghi đè không</b> (mặc định không ghi đè). Phiếu được ghi vào trình duyệt của admin; bảng kê trên Firebase không bị đụng tới.</p>
           <div className="flex flex-wrap gap-2">
             <input ref={dirRef} type="file" multiple className="hidden" {...({ webkitdirectory: '', directory: '' } as any)} onChange={e => onPickFolder(e.target.files)} />
             <input ref={filesRef} type="file" accept=".json,.zip" multiple className="hidden" onChange={e => onPickFolder(e.target.files)} />
