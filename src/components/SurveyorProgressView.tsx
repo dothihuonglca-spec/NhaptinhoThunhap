@@ -450,7 +450,7 @@ export const SurveyorProgressView: React.FC<SurveyorProgressViewProps> = ({
           <div>
             <h2 className="font-extrabold text-slate-800 text-sm md:text-base uppercase flex items-center gap-2">
               <BarChart3 className="w-5 h-5 text-teal-700" />
-              <span>Tiến độ Nhập tin theo từng Địa bàn & Xã (Quy chuẩn 10 hộ chính thức/địa bàn)</span>
+              <span>Tiến độ Nhập tin theo từng Địa bàn & Xã</span>
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
               Thống kê trực quan tiến độ thực hiện điều tra thu nhập, theo dõi số hộ đã nhập, chưa nhập và phân công điều tra viên tự động.
