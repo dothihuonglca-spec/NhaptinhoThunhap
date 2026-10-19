@@ -4464,17 +4464,6 @@ export default function App() {
             <span className="font-extrabold text-teal-950 text-xs">
               TNBQ: {perCapitaFilteredMonth > 0 ? `${perCapitaFilteredMonth.toLocaleString()} đ/người/tháng` : '0 đ'} 
             </span>
-            {(currentUser?.role === 'ADMIN' || currentUser?.role === 'SUPERVISOR') && (
-              <button
-                type="button"
-                onClick={handleNormalizeSectorsToTargets}
-                className="px-2.5 py-1 bg-teal-700 hover:bg-teal-800 text-white rounded font-bold text-xs flex items-center gap-1 shadow-2xs cursor-pointer transition-all ml-1"
-                title="Chuẩn hóa phân loại ngành toàn bộ hộ theo đúng chỉ tiêu Bảng kê chính thức"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>Chuẩn hóa ngành theo Bảng kê</span>
-              </button>
-            )}
           </div>
         </div>
 
