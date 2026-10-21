@@ -7674,6 +7674,7 @@ export default function App() {
           onSave={handleSaveQuestionnaire}
           currentUser={currentUser}
           allSurveyors={surveyors}
+          onNotification={showNotification}
         />
       )}
 
