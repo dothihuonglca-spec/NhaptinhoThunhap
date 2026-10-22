@@ -59,7 +59,9 @@ export default function DataSyncPanel({ currentUser, households, areas, communes
       const result = await importRosterFromJson(file);
       setRosterMsg(`Đã nạp ${result.communes} xã, ${result.surveyAreas} địa bàn, ${result.households} hộ vào máy này.`);
       setRosterMsgType('success');
-      showNotification('success', 'Đã nạp bảng kê từ file JSON.');
+      showNotification('success', 'Đã nạp bảng kê từ file JSON. Trang sẽ tải lại để hiển thị dữ liệu.');
+      // Reload để App.tsx load households mới từ IndexedDB/Firebase
+      setTimeout(() => { window.location.reload(); }, 1000);
     } catch (e: any) {
       setRosterMsg(e?.message || 'Nạp thất bại.');
       setRosterMsgType('error');
@@ -154,7 +156,7 @@ export default function DataSyncPanel({ currentUser, households, areas, communes
     if (!bk || !bkPlan) return;
     if (bkMode === 'replace' && !window.confirm('THAY TOÀN BỘ: xóa hết phiếu đã nhập đang có trên trình duyệt này rồi nạp từ file. Tiếp tục?')) return;
     setBusy(true);
-    try { const n = await applyRestore(bkPlan); showNotification('success', `Đã nạp ${n} phiếu.`); setBk(null); setBkPlan(null); }
+    try { const n = await applyRestore(bkPlan); showNotification('success', `Đã nạp ${n} phiếu. Trang sẽ tải lại để hiển thị dữ liệu nhập tin.`); setBk(null); setBkPlan(null); setTimeout(() => { window.location.reload(); }, 1000); }
     catch (e: any) { showNotification('error', `Nạp thất bại: ${e?.message || e}`); } finally { setBusy(false); }
   };
 
