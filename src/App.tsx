@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { db, handleFirestoreError, OperationType, safeFirestoreWrite, isQuotaExceeded, auth } from './firebase';
 import { collection, getDocs, addDoc, deleteDoc, doc, setDoc, getDoc, query, onSnapshot, writeBatch, setRosterScope, onRosterStatus, RosterStatus } from './utils/dataStore';
-import { getCachedRosterData, saveCommunes, saveAreas, saveRosters } from './utils/rosterCache';
+import { getCachedRosterData, saveCommunes, saveAreas, saveRosters, loadEmbeddedRosterData, fetchRosterFromPublic } from './utils/rosterCache';
 import DataSyncPanel from './components/DataSyncPanel';
 import { detectSampleStatus } from './utils/sampleStatus';
 import { planAssign, planImportAssignments, planUnassign, makeAreaAccess } from './utils/assignLogic';
@@ -589,9 +589,66 @@ export default function App() {
     };
 
     (async () => {
+      // Ưu tiên 1: Đọc dữ liệu nhúng trong mã nguồn (file embeddedRosterData.ts)
+      const embedded = loadEmbeddedRosterData();
+      if (embedded) {
+        // Lưu vào IndexedDB cho lần sau (để không parse lại mã nguồn)
+        try {
+          await saveCommunes(embedded.communes);
+          await saveAreas(embedded.surveyAreas);
+          await saveRosters(embedded.rosters);
+        } catch { /* ignore */ }
+
+        setCommunes(embedded.communes);
+        setAreas(embedded.surveyAreas);
+        const householdsFromRosters: Household[] = embedded.rosters.flatMap((r: any) =>
+          (Array.isArray(r.households) ? r.households : []).map((h: any) => ({
+            ...h,
+            areaId: r.areaId || r.id,
+            areaCode: h.areaCode || '001',
+            areaName: h.areaName || r.name || '',
+            communeCode: h.communeCode || '',
+            communeName: h.communeName || '',
+          }))
+        );
+        setHouseholds(householdsFromRosters);
+        setLoading(false);
+        subscribeSurveyors();
+        subscribeDepartments();
+        return;
+      }
+
+      // Ưu tiên 2: Đọc từ file public/bangke.json (admin copy vào public/)
+      const fromPublic = await fetchRosterFromPublic('bangke.json');
+      if (fromPublic) {
+        try {
+          await saveCommunes(fromPublic.communes);
+          await saveAreas(fromPublic.surveyAreas);
+          await saveRosters(fromPublic.rosters);
+        } catch { /* ignore */ }
+
+        setCommunes(fromPublic.communes);
+        setAreas(fromPublic.surveyAreas);
+        const householdsFromRosters: Household[] = fromPublic.rosters.flatMap((r: any) =>
+          (Array.isArray(r.households) ? r.households : []).map((h: any) => ({
+            ...h,
+            areaId: r.areaId || r.id,
+            areaCode: h.areaCode || '001',
+            areaName: h.areaName || r.name || '',
+            communeCode: h.communeCode || '',
+            communeName: h.communeName || '',
+          }))
+        );
+        setHouseholds(householdsFromRosters);
+        setLoading(false);
+        subscribeSurveyors();
+        subscribeDepartments();
+        return;
+      }
+
+      // Ưu tiên 3: Đọc từ IndexedDB local (lần trước đã cache)
       const cached = await getCachedRosterData();
       if (cached) {
-        // Có dữ liệu cache local → hiển thị ngay, không đọc Firebase cho bảng kê
         setCommunes(cached.communes);
         setAreas(cached.surveyAreas);
         const householdsFromRosters: Household[] = cached.rosters.flatMap((r: any) =>
@@ -606,13 +663,12 @@ export default function App() {
         );
         setHouseholds(householdsFromRosters);
         setLoading(false);
-        // Phân quyền & phòng ban vẫn đọc Firebase realtime
         subscribeSurveyors();
         subscribeDepartments();
         return;
       }
 
-      // Không có cache → đọc toàn bộ từ Firebase như cũ
+      // Ưu tiên 3: Không có gì → đọc toàn bộ từ Firebase như cũ
       subscribeCommunesFromFirebase();
       subscribeAreasFromFirebase();
       subscribeHouseholdsFromFirebase();
