@@ -8,6 +8,9 @@
  *  - rosters: bảng kê theo địa bàn, mỗi bản có mảng households
  */
 
+import { EMBEDDED_ROSTER_DATA } from '../data/embeddedRosterData';
+import type { EmbeddedRosterData } from '../data/embeddedRosterData';
+
 const DB_NAME = 'thongke_roster_cache_v1';
 const STORE_COMMUNES = 'communes';
 const STORE_AREAS = 'surveyAreas';
@@ -166,6 +169,36 @@ export async function clearCachedRosterData(): Promise<void> {
     idbClear(STORE_ROSTERS),
     idbClear(STORE_META),
   ]);
+}
+
+/**
+ * Đọc dữ liệu bảng kê nhúng từ mã nguồn (file src/data/embeddedRosterData.ts).
+ * Trả về null nếu mảng rosters rỗng (chưa có dữ liệu thật).
+ */
+export function loadEmbeddedRosterData(): EmbeddedRosterData | null {
+  const data = EMBEDDED_ROSTER_DATA;
+  if (!data || !Array.isArray(data.rosters) || data.rosters.length === 0) {
+    return null;
+  }
+  return data;
+}
+
+/**
+ * Đọc file bảng kê JSON từ thư mục public/ (ví dụ public/bangke.json).
+ * Trả về null nếu file không tồn tại hoặc lỗi.
+ */
+export async function fetchRosterFromPublic(fileName: string): Promise<EmbeddedRosterData | null> {
+  try {
+    const res = await fetch(`/${fileName}`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as EmbeddedRosterData;
+    if (!data || !Array.isArray(data.rosters) || data.rosters.length === 0) {
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
 }
 
 /**
